@@ -1,0 +1,71 @@
+/* ── Design System: Stock Simulation ── */
+:root {
+  /* Palette */
+  --color-bg:            #f5f6f8;
+  --color-surface:       #ffffff;
+  --color-sidebar:       #1a1d2e;
+  --color-sidebar-hover: #252a3e;
+  --color-sidebar-text:  #8b8fa3;
+  --color-sidebar-active:#3b82f6;
+
+  --color-text-primary:  #1e2130;
+  --color-text-secondary:#6b7280;
+  --color-text-muted:    #9ca3af;
+  --color-border:        #e5e7eb;
+  --color-divider:       #f0f0f5;
+
+  --color-up:            #e15241;   /* 红涨 */
+  --color-down:          #1aad56;   /* 绿跌 */
+  --color-up-bg:         #fef2f0;
+  --color-down-bg:       #f0faf5;
+
+  --color-primary:       #3b82f6;
+  --color-primary-light: #eff6ff;
+  --color-danger:        #ef4444;
+  --color-success:       #22c55e;
+  --color-warning:       #f59e0b;
+
+  /* Typography */
+  --font-family:         -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono:           "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+
+  --text-xs:             0.75rem;
+  --text-sm:             0.8125rem;
+  --text-base:           0.875rem;
+  --text-lg:             1rem;
+  --text-xl:             1.125rem;
+  --text-2xl:            1.5rem;
+  --text-3xl:            2rem;
+
+  /* Spacing */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:  0 2px 8px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg:  0 4px 16px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);
+  --shadow-xl:  0 8px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.04);
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Layout */
+  --sidebar-width: 220px;
+  --header-height: 56px;
+}
