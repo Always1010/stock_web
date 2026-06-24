@@ -24,8 +24,8 @@ A multi-user A-share stock simulation web application with personal watchlists, 
 │ Vue Router│  │  ├── MySQL 8.0               │
 │ ECharts 5 │  │  ├── APScheduler             │
 │ Axios     │  │  ├── JWT Auth                │
-│ Pinia     │  │  ├── akshare (数据源)        │
-│ Element+  │  │  └── Alembic (迁移)          │
+│ Pinia     │  │  ├── Sina Finance (数据源)   │
+│           │  │  └── Alembic (迁移)          │
 │           │  │                              │
 │ 纯静态文件  │  │  Pure JSON REST API          │
 └──────────┘  └──────────────────────────────┘
@@ -55,7 +55,7 @@ A multi-user A-share stock simulation web application with personal watchlists, 
 | Auth | JWT (python-jose) | Stateless authentication |
 | Password | passlib + bcrypt | Secure password hashing |
 | Scheduler | APScheduler | Cron jobs (06:00 crawl, 15:05 NAV) |
-| Data | akshare | Free A-share market data |
+| Data | Sina Finance API | Free A-share data (stock list + daily K-line) |
 | Server | uvicorn + gunicorn | ASGI multi-process serving |
 
 ### Deployment

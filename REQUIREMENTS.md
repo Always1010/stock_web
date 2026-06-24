@@ -41,20 +41,23 @@
 
 | 维度 | 说明 |
 |------|------|
-| 数据源 | 东方财富 HTTP API (`push2.eastmoney.com`) |
+| 数据源 | 新浪财经 HTTP API（股票列表 + K 线），Tencent API 备用 |
+| 股票列表接口 | `vip.stock.finance.sina.com.cn` → `Market_Center.getHQNodeData` |
+| K 线接口 | `money.finance.sina.com.cn` → `CN_MarketData.getKLineData` |
 | 调度 | APScheduler，cron 表达式 `hour=6, minute=0`，时区 Asia/Shanghai |
 | 执行入口 | `backend/app/services/scheduler.py` → `_crawl_job()` |
 | 爬取逻辑 | `backend/app/services/crawler.py` → `crawl_stock_list()` |
 | 存储表 | `stocks`（code, exchange, name, is_active） |
 | 增量策略 | 新股票 INSERT，已有股票比对 name 后 UPDATE |
 | 日志记录 | `crawl_log` 表（crawl_type='stock_list'） |
-| 备选方案 | `akshare` 库（`backend/app/services/crawler.py` 中保留切换能力） |
+| 重试机制 | `_http_get_json()` — 3 次指数退避重试（2s / 4s / 8s） |
+| 备选方案 | `akshare` 库、东方财富 API（`push2.eastmoney.com`） |
 
 **数据流**：
 ```
 APScheduler (06:00 CST)
   → crawler.crawl_stock_list()
-    → HTTP GET push2.eastmoney.com/api/qt/clist/get
+    → HTTP GET vip.stock.finance.sina.com.cn/.../Market_Center.getHQNodeData
       → 解析 JSON → [{code, name, exchange}]
         → SQLAlchemy UPSERT → stocks 表
           → 写入 crawl_log
