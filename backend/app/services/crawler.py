@@ -1,12 +1,9 @@
-"""Stock data crawler using East Money API directly."""
-import json
+"""Stock data crawler using Sina Finance API."""
 import logging
 import time
 from datetime import date, datetime
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
@@ -15,30 +12,54 @@ from app.models.stock import DailyKline, Stock
 
 logger = logging.getLogger(__name__)
 
-# East Money API endpoints
-EM_LIST_URL = "http://82.push2.eastmoney.com/api/qt/clist/get"
-EM_KLINE_URL = "http://82.push2his.eastmoney.com/api/qt/stock/kline/get"
+# ── Sina Finance API endpoints ──────────────────────────────
+SINA_STOCK_LIST = (
+    "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "Market_Center.getHQNodeData"
+)
+SINA_KLINE = (
+    "http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "CN_MarketData.getKLineData"
+)
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "http://quote.eastmoney.com/",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
 }
 
 
-def _create_session() -> requests.Session:
-    """Create a requests session with retry logic."""
-    retry_strategy = Retry(
-        total=3,
-        backoff_factor=2,
-        status_forcelist=[429, 500, 502, 503, 504],
-    )
-    adapter = HTTPAdapter(max_retries=retry_strategy)
-    session = requests.Session()
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    session.headers.update(HEADERS)
-    return session
+def _http_get_json(url: str, params: dict, timeout: int = 15, retries: int = 3) -> list | dict:
+    """
+    HTTP GET with retry, returning parsed JSON.
+    Sina API returns a JSON list (stock list) or list of dicts (K-line).
+    """
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+            resp.raise_for_status()
+            # Sina API returns JSON with Content-Type: text/html
+            text = resp.text.strip()
+            if not text:
+                raise ValueError("Empty response")
+            import json
+            return json.loads(text)
+        except requests.exceptions.ConnectionError as e:
+            last_exc = e
+            logger.warning(f"Connection error on attempt {attempt}/{retries}: {e}")
+        except requests.exceptions.Timeout as e:
+            last_exc = e
+            logger.warning(f"Timeout on attempt {attempt}/{retries}: {e}")
+        except Exception as e:
+            last_exc = e
+            logger.warning(f"Error on attempt {attempt}/{retries}: {e}")
+
+        if attempt < retries:
+            time.sleep(2 ** attempt)
+
+    raise last_exc  # type: ignore
 
 
 def _determine_exchange(code: str) -> str | None:
@@ -52,22 +73,20 @@ def _determine_exchange(code: str) -> str | None:
     return None
 
 
-def _em_market_code(code: str) -> str:
-    """Convert stock code to East Money market code."""
-    exchange = _determine_exchange(code)
-    if exchange == "SH":
-        return f"1.{code}"
-    elif exchange == "SZ":
-        return f"0.{code}"
-    elif exchange == "BJ":
-        return f"0.{code}"
-    return f"0.{code}"
+def _sina_symbol(code: str) -> str:
+    """Convert stock code to Sina symbol: sh600519, sz000001, bj830799"""
+    ex = _determine_exchange(code)
+    return f"{ex.lower()}{code}"
 
+
+# ═══════════════════════════════════════════════════════════
+# Stock List
+# ═══════════════════════════════════════════════════════════
 
 def crawl_stock_list(db: Session | None = None) -> dict:
     """
-    Crawl A-share stock list from East Money API.
-    Upserts into stocks table. Returns summary dict.
+    Crawl A-share stock list from Sina Finance.
+    Fetches all pages, upserts into stocks table.
     """
     close_db = False
     if db is None:
@@ -75,43 +94,38 @@ def crawl_stock_list(db: Session | None = None) -> dict:
         close_db = True
 
     try:
-        logger.info("Starting stock list crawl...")
+        logger.info("Starting stock list crawl (Sina Finance)...")
 
         all_stocks = []
         page = 1
-        page_size = 500
+        page_size = 100
 
         while True:
             params = {
-                "pn": str(page),
-                "pz": str(page_size),
-                "po": "1",
-                "np": "1",
-                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-                "fltt": "2",
-                "invt": "2",
-                "fid": "f3",
-                "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
-                "fields": "f12,f14",
+                "page": page,
+                "num": page_size,
+                "sort": "symbol",
+                "asc": 1,
+                "node": "hs_a",       # A-share market
+                "symbol": "",
+                "_s_r_a": "init",
             }
-            resp = requests.get(EM_LIST_URL, params=params, headers=HEADERS, timeout=15)
-            data = resp.json()
-            diff = data.get("data", {}).get("diff", [])
-            if not diff:
+            data = _http_get_json(SINA_STOCK_LIST, params)
+            if not isinstance(data, list) or len(data) == 0:
                 break
 
-            for item in diff:
-                code = item.get("f12", "")
-                name = item.get("f14", "")
+            for item in data:
+                code = item.get("code", "")
+                name = item.get("name", "")
                 exchange = _determine_exchange(code)
                 if code and name and exchange:
+                    # Also capture latest price from the list response
                     all_stocks.append({"code": code, "name": name, "exchange": exchange})
 
-            total = data.get("data", {}).get("total", 0)
-            if page * page_size >= total:
+            if len(data) < page_size:
                 break
             page += 1
-            time.sleep(0.2)
+            time.sleep(0.3)
 
         added = 0
         updated = 0
@@ -140,19 +154,21 @@ def crawl_stock_list(db: Session | None = None) -> dict:
         db.add(log)
         db.commit()
 
-        logger.info(f"Stock list crawl done: added={added}, updated={updated}, total={len(all_stocks)}")
+        logger.info(
+            f"Stock list crawl done: added={added}, updated={updated}, total={len(all_stocks)}"
+        )
         return {"added": added, "updated": updated, "total": len(all_stocks)}
 
     except Exception as e:
         logger.error(f"Stock list crawl failed: {e}")
         try:
-            log = CrawlLog(
-                crawl_type="stock_list",
-                ref_date=date.today(),
-                status="failed",
-                details={"error": str(e)},
-            )
             if close_db:
+                log = CrawlLog(
+                    crawl_type="stock_list",
+                    ref_date=date.today(),
+                    status="failed",
+                    details={"error": str(e)},
+                )
                 db.add(log)
                 db.commit()
         except Exception:
@@ -163,49 +179,41 @@ def crawl_stock_list(db: Session | None = None) -> dict:
             db.close()
 
 
-def crawl_kline_for_stock(stock: Stock, db: Session, days: int = 365) -> int:
+# ═══════════════════════════════════════════════════════════
+# K-line
+# ═══════════════════════════════════════════════════════════
+
+def crawl_kline_for_stock(stock: Stock, db: Session, datalen: int = 400) -> int:
     """
-    Crawl daily K-line data for a single stock from East Money API.
+    Crawl daily K-line for one stock from Sina Finance.
     Returns number of new records inserted.
     """
-    market_code = _em_market_code(stock.code)
     params = {
-        "secid": market_code,
-        "klt": "101",  # Daily K-line
-        "fqt": "1",    # Forward-adjusted (前复权)
-        "beg": "20240101",
-        "end": date.today().strftime("%Y%m%d"),
-        "lmt": str(days),
-        "fields1": "f1,f2,f3,f4,f5,f6",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57",
+        "symbol": _sina_symbol(stock.code),
+        "scale": "240",        # daily
+        "ma": "no",            # no MA (we calculate in frontend)
+        "datalen": str(datalen),
     }
 
     try:
-        resp = requests.get(EM_KLINE_URL, params=params, headers=HEADERS, timeout=15)
-        data = resp.json()
-
-        klines_raw = data.get("data", {}).get("klines", [])
-        if not klines_raw:
+        data = _http_get_json(SINA_KLINE, params)
+        if not isinstance(data, list) or len(data) == 0:
             return 0
 
         inserted = 0
-        for line in klines_raw:
-            parts = line.split(",")
-            if len(parts) < 7:
-                continue
-
-            # Format: date,open,close,high,low,volume,amount
-            trade_date_str = parts[0]
+        for item in data:
+            trade_date_str = item.get("day", "")
             if len(trade_date_str) == 8:
                 trade_date = date(
                     int(trade_date_str[:4]),
                     int(trade_date_str[4:6]),
                     int(trade_date_str[6:8]),
                 )
-            else:
+            elif "-" in trade_date_str:
                 trade_date = date.fromisoformat(trade_date_str)
+            else:
+                continue
 
-            # Check if already exists
             existing = (
                 db.query(DailyKline)
                 .filter(
@@ -220,12 +228,12 @@ def crawl_kline_for_stock(stock: Stock, db: Session, days: int = 365) -> int:
             kline = DailyKline(
                 stock_id=stock.id,
                 trade_date=trade_date,
-                open=float(parts[1]),
-                close=float(parts[2]),
-                high=float(parts[3]),
-                low=float(parts[4]),
-                volume=int(parts[5]),
-                amount=float(parts[6]),
+                open=float(item["open"]),
+                high=float(item["high"]),
+                low=float(item["low"]),
+                close=float(item["close"]),
+                volume=int(item["volume"]),
+                amount=float(item.get("amount", 0) or 0),
             )
             db.add(kline)
             inserted += 1
@@ -241,7 +249,7 @@ def crawl_kline_for_stock(stock: Stock, db: Session, days: int = 365) -> int:
 def crawl_kline_on_demand(
     stock: Stock, db: Session, start: str | None = None, end: str | None = None
 ) -> list[DailyKline]:
-    """Fetch K-line data on demand for a stock, then return all records."""
+    """Fetch K-line on demand, then return all records for this stock."""
     count = crawl_kline_for_stock(stock, db)
     if count > 0:
         logger.info(f"On-demand crawl for {stock.code}: {count} records")
@@ -255,8 +263,7 @@ def crawl_kline_on_demand(
 
 def crawl_all_kline(db: Session | None = None, limit: int | None = None) -> dict:
     """
-    Crawl K-line data for all active stocks.
-    Rate-limited to ~2 requests/second.
+    Crawl K-line for all active stocks. Rate-limited ~2 req/sec.
     """
     close_db = False
     if db is None:
@@ -277,13 +284,12 @@ def crawl_all_kline(db: Session | None = None, limit: int | None = None) -> dict
                 total_inserted += inserted
                 if (i + 1) % 20 == 0:
                     logger.info(
-                        f"Crawled K-line: {i+1}/{len(stocks)} stocks, {total_inserted} records"
+                        f"K-line: {i+1}/{len(stocks)} stocks, {total_inserted} records"
                     )
             except Exception as e:
                 errors += 1
-                logger.error(f"Error crawling {stock.code}: {e}")
+                logger.error(f"Error {stock.code}: {e}")
 
-            # Rate limit: ~2 req/sec
             time.sleep(0.5)
 
         log = CrawlLog(
