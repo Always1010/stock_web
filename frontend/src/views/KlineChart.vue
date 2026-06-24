@@ -35,6 +35,14 @@
         <span class="detail-label">成交额</span>
         <span class="detail-value">{{ fmtAmount(latestData.amount) }}</span>
       </div>
+      <button class="hero-star" @click="addWatchlist">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        加自选
+      </button>
+    </div>
+
+    <!-- Change indicators -->
+    <div class="change-card" v-if="latestData && klineData.length >= 2">
       <div class="detail-item">
         <span class="detail-label">涨幅</span>
         <span class="detail-value" :class="priceColor">{{ latestChangePct >= 0 ? '+' : '' }}{{ latestChangePct.toFixed(2) }}%</span>
@@ -44,10 +52,11 @@
         <span class="detail-value" v-if="amplitude != null">{{ amplitude.toFixed(2) }}%</span>
         <span class="detail-value" v-else>--</span>
       </div>
-      <button class="hero-star" @click="addWatchlist">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        加自选
-      </button>
+      <div class="detail-item">
+        <span class="detail-label">距今日</span>
+        <span class="detail-value" v-if="relChangeStart != null" :class="relChangeStart <= 0 ? 'up' : 'down'">{{ relChangeStart <= 0 ? '' : '+' }}{{ relChangeStart.toFixed(2) }}%</span>
+        <span class="detail-value" v-else>--</span>
+      </div>
     </div>
 
     <!-- Range bar -->
@@ -98,6 +107,13 @@ const amplitude = computed(() => {
   const prevClose = klineData.value[klineData.value.length - 2].close
   if (!prevClose) return null
   return +(((latestData.value.high - latestData.value.low) / prevClose) * 100).toFixed(2)
+})
+const relChangeStart = computed(() => {
+  if (klineData.value.length < 2) return null
+  const latest = klineData.value[klineData.value.length - 1].close
+  const first = klineData.value[0].close
+  if (!latest || !first) return null
+  return +(((first - latest) / latest) * 100).toFixed(2)
 })
 
 function fmtAmount(v) {
@@ -202,6 +218,14 @@ onUnmounted(() => { window.removeEventListener('resize', hr); chart?.dispose() }
   transition: all var(--transition-fast);
 }
 .hero-star:hover { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+
+/* ── Change card ── */
+.change-card {
+  display: flex; align-items: center; gap: var(--space-6);
+  background: var(--color-surface); border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-6); margin-bottom: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
 
 /* ── Range ── */
 .range-bar { display: flex; gap: 4px; background: var(--color-bg); padding: 4px; border-radius: var(--radius-sm); width: fit-content; margin-bottom: var(--space-4); }
