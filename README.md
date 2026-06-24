@@ -170,7 +170,7 @@ stock_web/
 ├── stop.sh                # 停止脚本
 ├── install.sh             # 一键安装（仅首次执行）
 ├── stock-web.service      # systemd 服务文件
-├── ARCHITECTURE.md        # 架构设计文档
+├── Doc_架构说明.md          # 架构设计文档
 │
 ├── frontend/              # Vue 3 前端
 │   ├── src/
