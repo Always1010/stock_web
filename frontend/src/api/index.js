@@ -42,6 +42,7 @@ export const stockApi = {
   search: (q, limit) => api.get('/stocks', { params: { q, ...(limit ? { limit } : {}) } }),
   detail: (code) => api.get(`/stocks/${code}`),
   kline: (code, start, end) => api.get(`/stocks/${code}/kline`, { params: { start, end } }),
+  refresh: (code) => api.post(`/stocks/${code}/refresh`),
 }
 
 // ── Watchlist ─────────────────────────────────────

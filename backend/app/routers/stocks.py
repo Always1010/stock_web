@@ -87,6 +87,22 @@ def get_stock(
     return stock
 
 
+@router.post("/{code}/refresh")
+def refresh_stock(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-crawl K-line data for a stock, useful for fixing missing/erroneous data."""
+    stock = db.query(Stock).filter(Stock.code == code, Stock.is_active == 1).first()
+    if not stock:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock not found")
+
+    from app.services.crawler import crawl_kline_for_stock
+    affected = crawl_kline_for_stock(stock, db, overwrite=True)
+    return {"code": code, "affected": affected, "message": f"Fully refreshed {affected} records for {code}"}
+
+
 @router.get("/{code}/kline", response_model=KlineResponse)
 def get_kline(
     code: str,
