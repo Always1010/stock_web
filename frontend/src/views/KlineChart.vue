@@ -185,10 +185,8 @@ async function fetchData() {
         if (rel != null) {
           rows.push(`${params[1].marker} 距今日 <b style="color:${rel >= 0 ? '#e15241' : '#1aad56'}">${rel >= 0 ? '+' : ''}${rel}%</b>`)
         }
-        if (params[2]) {
-          const vs = d.volume >= 1e8 ? (d.volume/1e8).toFixed(2)+'亿' : (d.volume/1e4).toFixed(0)+'万手'
-          rows.push(`${params[2].marker} 量 <b>${vs}</b>`)
-        }
+        const vs = d.volume >= 1e8 ? (d.volume/1e8).toFixed(2)+'亿' : (d.volume/1e4).toFixed(0)+'万手'
+        rows.push(`<span style="display:inline-block;width:36px;color:#9ca3af;font-size:11px">成交量</span> <b>${vs}</b>`)
         return rows.join('<br>')
       },
     },
