@@ -1,7 +1,7 @@
 <template>
   <div class="shell">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" :class="{ collapsed }">
       <div class="sidebar-brand" @click="$router.push('/')">
         <div class="brand-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
@@ -14,42 +14,44 @@
           <span class="nav-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           </span>
-          <span>首页</span>
+          <span class="nav-label">首页</span>
         </router-link>
 
         <router-link to="/market" class="nav-item" active-class="active">
           <span class="nav-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
           </span>
-          <span>市场行情</span>
-        </router-link>
-
-        <router-link to="/stocks" class="nav-item" active-class="active">
-          <span class="nav-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          </span>
-          <span>股票搜索</span>
+          <span class="nav-label">市场行情</span>
         </router-link>
 
         <router-link to="/watchlist" class="nav-item" active-class="active">
           <span class="nav-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           </span>
-          <span>我的自选</span>
+          <span class="nav-label">我的自选</span>
         </router-link>
 
         <router-link to="/portfolios" class="nav-item" active-class="active">
           <span class="nav-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
           </span>
-          <span>我的组合</span>
+          <span class="nav-label">我的组合</span>
         </router-link>
       </nav>
+
+      <!-- Toggle button -->
+      <button class="collapse-btn" @click="collapsed = !collapsed" :title="collapsed ? '展开菜单' : '收起菜单'">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline v-if="collapsed" points="9 18 15 12 9 6"/>
+          <polyline v-else points="15 18 9 12 15 6"/>
+        </svg>
+        <span v-if="!collapsed" class="collapse-text">收起</span>
+      </button>
 
       <div class="sidebar-footer">
         <div class="user-card">
           <div class="user-avatar">{{ auth.user?.username?.[0]?.toUpperCase() }}</div>
-          <div>
+          <div v-if="!collapsed">
             <div class="user-name">{{ auth.user?.username }}</div>
             <div class="user-role">交易员</div>
           </div>
@@ -58,10 +60,13 @@
     </aside>
 
     <!-- Main -->
-    <div class="main">
+    <div class="main" :class="{ collapsed }">
       <header class="topbar">
         <div class="topbar-left">
           <span class="topbar-greeting">{{ greeting }}</span>
+        </div>
+        <div class="topbar-center">
+          <StockSearchBar />
         </div>
         <div class="topbar-right">
           <button class="btn-icon" @click="$router.push('/portfolios/create')" title="创建组合">
@@ -81,13 +86,15 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import StockSearchBar from './StockSearchBar.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const collapsed = ref(false)
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -103,171 +110,104 @@ function handleLogout() {
 </script>
 
 <style scoped>
-.shell {
-  display: flex;
-  min-height: 100vh;
-  background: var(--color-bg);
-}
+.shell { display: flex; min-height: 100vh; background: var(--color-bg); }
 
 /* ── Sidebar ── */
 .sidebar {
   width: var(--sidebar-width);
   background: var(--color-sidebar);
-  display: flex;
-  flex-direction: column;
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  z-index: 100;
+  display: flex; flex-direction: column;
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 100;
+  transition: width var(--transition-base);
 }
+.sidebar.collapsed { width: 64px; }
 
 .sidebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 20px 20px 28px;
-  cursor: pointer;
-  user-select: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 20px 16px 28px;
+  cursor: pointer; user-select: none; overflow: hidden;
 }
 .brand-icon {
-  width: 36px; height: 36px;
+  width: 32px; height: 32px; flex-shrink: 0;
   background: linear-gradient(135deg, #3b82f6, #2563eb);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
+  border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff;
 }
 .brand-text {
-  font-size: 16px;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: 0.02em;
+  font-size: 16px; font-weight: 700; color: #fff;
+  letter-spacing: 0.02em; white-space: nowrap;
+  transition: opacity var(--transition-base);
 }
+.collapsed .brand-text { opacity: 0; width: 0; overflow: hidden; }
 
-.sidebar-nav {
-  flex: 1;
-  padding: 0 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+.sidebar-nav { flex: 1; padding: 0 12px; display: flex; flex-direction: column; gap: 2px; }
 
 .nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  color: var(--color-sidebar-text);
-  font-size: 14px;
-  font-weight: 500;
-  transition: all var(--transition-fast);
-  text-decoration: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px;
+  color: var(--color-sidebar-text); font-size: 14px; font-weight: 500;
+  transition: all var(--transition-fast); text-decoration: none;
+  overflow: hidden; white-space: nowrap;
 }
-.nav-item:hover {
-  background: var(--color-sidebar-hover);
-  color: #d1d5db;
-}
-.nav-item.active {
-  background: rgba(59, 130, 246, 0.15);
-  color: var(--color-sidebar-active);
-}
-.nav-icon {
-  display: flex;
-  align-items: center;
-  width: 20px;
-  opacity: 0.7;
-}
+.nav-item:hover { background: var(--color-sidebar-hover); color: #d1d5db; }
+.nav-item.active { background: rgba(59, 130, 246, 0.15); color: var(--color-sidebar-active); }
+.nav-icon { display: flex; align-items: center; width: 20px; flex-shrink: 0; opacity: 0.7; }
 .nav-item.active .nav-icon { opacity: 1; }
+.nav-label { transition: opacity var(--transition-base); }
+.collapsed .nav-label { opacity: 0; width: 0; overflow: hidden; }
+
+/* ── Collapse toggle ── */
+.collapse-btn {
+  display: flex; align-items: center; gap: 8px;
+  width: calc(100% - 24px); margin: 0 12px 8px;
+  padding: 8px 12px; border: none; background: transparent;
+  border-radius: 8px; color: var(--color-sidebar-text);
+  cursor: pointer; font-family: inherit; font-size: 12px;
+  transition: all var(--transition-fast); overflow: hidden;
+}
+.collapse-btn:hover { background: var(--color-sidebar-hover); color: #d1d5db; }
+.collapse-btn svg { flex-shrink: 0; }
+.collapse-text { white-space: nowrap; }
+.collapsed .collapse-text { opacity: 0; width: 0; overflow: hidden; }
 
 /* Sidebar footer */
-.sidebar-footer {
-  padding: 16px;
-  border-top: 1px solid rgba(255,255,255,0.06);
-}
-.user-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border-radius: 8px;
-}
+.sidebar-footer { padding: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+.user-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; overflow: hidden; }
 .user-avatar {
-  width: 32px; height: 32px;
-  border-radius: 8px;
+  width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px;
   background: linear-gradient(135deg, #6366f1, #4f46e5);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600;
 }
-.user-name {
-  font-size: 13px;
-  color: #e5e7eb;
-  font-weight: 500;
-}
-.user-role {
-  font-size: 11px;
-  color: var(--color-sidebar-text);
-}
+.user-name { font-size: 13px; color: #e5e7eb; font-weight: 500; white-space: nowrap; }
+.user-role { font-size: 11px; color: var(--color-sidebar-text); white-space: nowrap; }
 
 /* ── Main ── */
 .main {
-  flex: 1;
-  margin-left: var(--sidebar-width);
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
+  flex: 1; margin-left: var(--sidebar-width);
+  display: flex; flex-direction: column; min-height: 100vh;
+  transition: margin-left var(--transition-base);
 }
+.main.collapsed { margin-left: 64px; }
 
 /* ── Topbar ── */
 .topbar {
-  height: var(--header-height);
-  background: var(--color-surface);
+  height: var(--header-height); background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 var(--space-8);
-  position: sticky;
-  top: 0;
-  z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--space-8); position: sticky; top: 0; z-index: 50;
 }
-.topbar-greeting {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  font-weight: 500;
-}
-.topbar-right {
-  display: flex;
-  gap: 4px;
-}
+.topbar-left { width: 100px; flex-shrink: 0; }
+.topbar-center { flex: 1; display: flex; justify-content: center; padding: 0 var(--space-4); }
+.topbar-right { width: 100px; flex-shrink: 0; display: flex; gap: 4px; justify-content: flex-end; }
+.topbar-greeting { font-size: var(--text-sm); color: var(--color-text-secondary); font-weight: 500; }
+
 .btn-icon {
-  width: 36px; height: 36px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
+  width: 36px; height: 36px; border: none; background: transparent;
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-secondary); cursor: pointer; transition: all var(--transition-fast);
 }
-.btn-icon:hover {
-  background: var(--color-bg);
-  color: var(--color-text-primary);
-}
+.btn-icon:hover { background: var(--color-bg); color: var(--color-text-primary); }
 
 /* ── Content ── */
-.content {
-  flex: 1;
-  padding: var(--space-8);
-  max-width: 1280px;
-  width: 100%;
-}
+.content { flex: 1; padding: var(--space-8); max-width: 1280px; width: 100%; }
 </style>
