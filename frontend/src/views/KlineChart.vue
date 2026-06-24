@@ -35,6 +35,15 @@
         <span class="detail-label">成交额</span>
         <span class="detail-value">{{ fmtAmount(latestData.amount) }}</span>
       </div>
+      <div class="detail-item">
+        <span class="detail-label">涨幅</span>
+        <span class="detail-value" :class="priceColor">{{ latestChangePct >= 0 ? '+' : '' }}{{ latestChangePct.toFixed(2) }}%</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">振幅</span>
+        <span class="detail-value" v-if="amplitude != null">{{ amplitude.toFixed(2) }}%</span>
+        <span class="detail-value" v-else>--</span>
+      </div>
       <button class="hero-star" @click="addWatchlist">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
         加自选
@@ -84,6 +93,12 @@ const priceColor = computed(() => {
   if (latestChange.value < 0) return 'down'
   return ''
 })
+const amplitude = computed(() => {
+  if (!latestData.value || klineData.value.length < 2) return null
+  const prevClose = klineData.value[klineData.value.length - 2].close
+  if (!prevClose) return null
+  return +(((latestData.value.high - latestData.value.low) / prevClose) * 100).toFixed(2)
+})
 
 function fmtAmount(v) {
   if (!v || v === 0) return '--'
@@ -99,14 +114,10 @@ function getDateRange() {
   return { start: new Date(today.getTime() - map[range.value] * 86400000).toISOString().slice(0, 10), end }
 }
 
-function calcMA(data, period) {
-  const r = []
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) { r.push(null); continue }
-    let s = 0; for (let j = 0; j < period; j++) s += data[i - j][4]
-    r.push(+(s / period).toFixed(2))
-  }
-  return r
+function calcRelChange(data) {
+  if (!data.length) return []
+  const latestClose = data[data.length - 1].close
+  return data.map(d => d.close ? +(((d.close - latestClose) / latestClose) * 100).toFixed(2) : null)
 }
 
 async function fetchData() {
@@ -124,8 +135,8 @@ async function fetchData() {
   chart.setOption({
     backgroundColor: '#fff',
     grid: [
-      { left: '10%', right: '10%', top: 20, height: '58%' },
-      { left: '10%', right: '10%', top: '78%', height: '15%' },
+      { left: '8%', right: '12%', top: 20, height: '58%' },
+      { left: '8%', right: '12%', top: '78%', height: '15%' },
     ],
     xAxis: [
       { type: 'category', data: dates, gridIndex: 0, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisTick: { show: false }, axisLabel: { show: false } },
@@ -134,12 +145,11 @@ async function fetchData() {
     yAxis: [
       { type: 'value', gridIndex: 0, scale: true, splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#9ca3af', fontSize: 10 } },
       { type: 'value', gridIndex: 1, splitLine: { show: false }, axisLabel: { color: '#9ca3af', fontSize: 10, formatter: v => v >= 1e8 ? (v/1e8).toFixed(1)+'亿' : (v/1e4).toFixed(0)+'万' } },
+      { type: 'value', gridIndex: 0, position: 'right', splitLine: { show: false }, axisLabel: { color: '#6366f1', fontSize: 9, formatter: v => v.toFixed(0) + '%' } },
     ],
     series: [
       { name: 'K线', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0, itemStyle: { color: '#e15241', color0: '#1aad56', borderColor: '#e15241', borderColor0: '#1aad56' } },
-      { name: 'MA5', type: 'line', data: calcMA(res.data, 5), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#f59e0b' } },
-      { name: 'MA10', type: 'line', data: calcMA(res.data, 10), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#3b82f6' } },
-      { name: 'MA20', type: 'line', data: calcMA(res.data, 20), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#8b5cf6' } },
+      { name: '距今日', type: 'line', data: calcRelChange(res.data), xAxisIndex: 0, yAxisIndex: 2, smooth: true, symbol: 'none', lineStyle: { width: 1.5, color: '#6366f1', type: 'dashed' } },
       { name: '量', type: 'bar', data: volumes.map((v, i) => ({ value: v, itemStyle: { color: i > 0 && ohlc[i] ? (ohlc[i][1] >= ohlc[i-1][1] ? '#e15241' : '#1aad56') : '#e15241', opacity: 0.5 } })), xAxisIndex: 1, yAxisIndex: 1 },
     ],
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: '#fff', borderColor: '#e5e7eb', textStyle: { color: '#1e2130', fontSize: 12 } },
