@@ -1,5 +1,7 @@
 """Stock data crawler using Sina Finance API."""
+import json
 import logging
+import re
 import time
 from datetime import date, datetime
 
@@ -8,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models.crawl import CrawlLog
+from app.models.market import MarketBreadth, MarketIndex, SectorData
 from app.models.stock import DailyKline, Stock
 
 logger = logging.getLogger(__name__)
@@ -310,3 +313,215 @@ def crawl_all_kline(db: Session | None = None, limit: int | None = None) -> dict
     finally:
         if close_db and db:
             db.close()
+
+
+# ═══════════════════════════════════════════════════════════
+# Market Indices (Sina real-time)
+# ═══════════════════════════════════════════════════════════
+
+INDEX_CONFIG = [
+    {"code": "sh000001", "name": "上证指数", "board": "SH"},
+    {"code": "sz399001", "name": "深证成指", "board": "SZ"},
+    {"code": "sz399006", "name": "创业板指", "board": "SZ"},
+    {"code": "sh000688", "name": "科创50", "board": "SH"},
+    {"code": "sh000300", "name": "沪深300", "board": "SH"},
+]
+
+SINA_REALTIME_URL = "http://hq.sinajs.cn/list="
+
+
+def _fetch_sina_realtime(symbols: list[str]) -> dict[str, dict]:
+    """Fetch real-time quotes from Sina for given symbols."""
+    url = SINA_REALTIME_URL + ",".join(symbols)
+    headers = {**HEADERS, "Referer": "http://finance.sina.com.cn/"}
+    resp = requests.get(url, headers=headers, timeout=10)
+    resp.encoding = "gbk"
+    results = {}
+    for line in resp.text.strip().split("\n"):
+        match = re.match(r'var hq_str_(\w+)="(.+)"', line.strip())
+        if not match:
+            continue
+        sym = match.group(1)
+        values = match.group(2).split(",")
+        results[sym] = values
+    return results
+
+
+def crawl_market_indices(db: Session | None = None) -> dict:
+    """Crawl major A-share indices and store in market_index."""
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        today = date.today()
+        data = _fetch_sina_realtime([c["code"] for c in INDEX_CONFIG])
+        inserted = 0
+        for cfg in INDEX_CONFIG:
+            key = cfg["code"]
+            if key not in data or len(data[key]) < 6:
+                continue
+            vals = data[key]
+            open_p = float(vals[1])
+            prev_close = float(vals[2])
+            current = float(vals[3])
+            high = float(vals[4])
+            low = float(vals[5])
+            change = current - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
+
+            existing = (
+                db.query(MarketIndex)
+                .filter(MarketIndex.code == cfg["code"], MarketIndex.trade_date == today)
+                .first()
+            )
+            if existing:
+                existing.open = open_p; existing.high = high; existing.low = low
+                existing.close = current; existing.change = round(change, 2)
+                existing.change_pct = round(change_pct, 2)
+            else:
+                db.add(MarketIndex(
+                    code=cfg["code"], name=cfg["name"], trade_date=today,
+                    open=open_p, high=high, low=low, close=current,
+                    change=round(change, 2), change_pct=round(change_pct, 2),
+                ))
+                inserted += 1
+        db.commit()
+        logger.info(f"Market indices: {inserted} new")
+        return {"indices": len(INDEX_CONFIG), "inserted": inserted}
+    except Exception as e:
+        logger.error(f"Index crawl failed: {e}")
+        raise
+    finally:
+        if close_db and db:
+            db.close()
+
+
+def crawl_market_breadth(db: Session | None = None) -> dict:
+    """Calculate up/down/flat counts from latest K-line data."""
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        from sqlalchemy import func as sqla_func
+
+        latest_date = db.query(sqla_func.max(DailyKline.trade_date)).scalar()
+        if not latest_date:
+            return {"breadth": 0}
+
+        boards = {"SH": "沪市", "SZ": "深市", "BJ": "北交所"}
+        inserted = 0
+        for board_code in boards:
+            stocks = db.query(Stock).filter(Stock.exchange == board_code, Stock.is_active == 1).all()
+            up = down = flat = 0
+            for s in stocks:
+                k = (
+                    db.query(DailyKline)
+                    .filter(DailyKline.stock_id == s.id, DailyKline.trade_date == latest_date)
+                    .first()
+                )
+                if k:
+                    chg = k.close - k.open
+                    if chg > 0: up += 1
+                    elif chg < 0: down += 1
+                    else: flat += 1
+            total = up + down + flat
+            if total == 0:
+                continue
+
+            existing = (
+                db.query(MarketBreadth)
+                .filter(MarketBreadth.board == board_code, MarketBreadth.trade_date == latest_date)
+                .first()
+            )
+            if existing:
+                existing.total = total; existing.up_count = up
+                existing.down_count = down; existing.flat_count = flat
+            else:
+                db.add(MarketBreadth(
+                    board=board_code, trade_date=latest_date,
+                    total=total, up_count=up, down_count=down, flat_count=flat,
+                ))
+                inserted += 1
+        db.commit()
+        logger.info(f"Market breadth: {inserted} new boards")
+        return {"boards": len(boards), "inserted": inserted}
+    except Exception as e:
+        logger.error(f"Breadth crawl failed: {e}")
+        raise
+    finally:
+        if close_db and db:
+            db.close()
+
+
+def crawl_sectors(db: Session | None = None) -> dict:
+    """Crawl sector/板块 rankings from East Money."""
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        today = date.today()
+        url = "http://push2.eastmoney.com/api/qt/clist/get"
+        params = {
+            "pn": "1", "pz": "30", "po": "1", "np": "1",
+            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+            "fltt": "2", "invt": "2", "fid": "f3",
+            "fs": "m:90+t:2",
+            "fields": "f2,f3,f12,f14,f100,f102",
+        }
+        hdrs = {**HEADERS, "Referer": "http://quote.eastmoney.com/"}
+        resp = requests.get(url, params=params, headers=hdrs, timeout=15)
+        data = resp.json()
+        items = data.get("data", {}).get("diff", [])
+        inserted = 0
+
+        for rank, item in enumerate(items, 1):
+            code = item.get("f12", ""); name = item.get("f14", "")
+            change_pct = float(item.get("f3", 0) or 0)
+            if not code or not name:
+                continue
+            existing = (
+                db.query(SectorData)
+                .filter(SectorData.code == code, SectorData.trade_date == today)
+                .first()
+            )
+            if existing:
+                existing.change_pct = round(change_pct, 2)
+                existing.rank = rank
+                existing.leading_stock = item.get("f100") or None
+                existing.leading_stock_change = round(float(item.get("f102", 0) or 0), 2) if item.get("f102") else None
+            else:
+                db.add(SectorData(
+                    code=code, name=name, trade_date=today,
+                    change_pct=round(change_pct, 2), rank=rank,
+                    leading_stock=item.get("f100") or None,
+                    leading_stock_change=round(float(item.get("f102", 0) or 0), 2) if item.get("f102") else None,
+                ))
+                inserted += 1
+        db.commit()
+        logger.info(f"Sectors: {inserted} new")
+        return {"sectors": len(items), "inserted": inserted}
+    except Exception as e:
+        logger.error(f"Sector crawl failed: {e}")
+        raise
+    finally:
+        if close_db and db:
+            db.close()
+
+
+def crawl_all_market_data() -> dict:
+    """Run all market crawls, return summary."""
+    db = SessionLocal()
+    try:
+        r = {}
+        try: r["indices"] = crawl_market_indices(db)
+        except Exception as e: r["indices"] = {"error": str(e)}
+        try: r["breadth"] = crawl_market_breadth(db)
+        except Exception as e: r["breadth"] = {"error": str(e)}
+        try: r["sectors"] = crawl_sectors(db)
+        except Exception as e: r["sectors"] = {"error": str(e)}
+        return r
+    finally:
+        db.close()
