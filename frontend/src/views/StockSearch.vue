@@ -31,8 +31,13 @@
           </span>
           <span v-else class="result-change">--</span>
         </div>
-        <button class="result-star" @click.stop="addWatchlist(s.code)" title="加自选">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <button
+          class="result-star"
+          :class="{ watched: watchlistCodes.has(s.code) }"
+          @click.stop="toggleWatchlist(s.code)"
+          :title="watchlistCodes.has(s.code) ? '取消自选' : '加自选'"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistCodes.has(s.code) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
         </button>
       </div>
     </div>
@@ -56,6 +61,7 @@ const router = useRouter()
 const keyword = ref('')
 const results = ref([])
 const loading = ref(false)
+const watchlistCodes = ref(new Set())
 
 async function doSearch(q) {
   if (!q) { results.value = []; return }
@@ -68,11 +74,15 @@ function goKline(code) {
   router.push(`/stocks/${code}/kline`)
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (route.query.q) {
     keyword.value = route.query.q
     doSearch(route.query.q)
   }
+  try {
+    const { data } = await watchlistApi.list()
+    watchlistCodes.value = new Set(data.items.map(w => w.code))
+  } catch { /* ignore */ }
 })
 
 watch(() => route.query.q, (newQ) => {
@@ -82,9 +92,20 @@ watch(() => route.query.q, (newQ) => {
   }
 })
 
-async function addWatchlist(code) {
-  try { await watchlistApi.add(code); ElMessage.success(`已添加 ${code} 到自选`) }
-  catch { /* handled */ }
+async function toggleWatchlist(code) {
+  if (watchlistCodes.value.has(code)) {
+    try {
+      await watchlistApi.remove(code)
+      watchlistCodes.value.delete(code)
+      ElMessage.success(`已取消自选 ${code}`)
+    } catch { /* handled */ }
+  } else {
+    try {
+      await watchlistApi.add(code)
+      watchlistCodes.value.add(code)
+      ElMessage.success(`已添加 ${code} 到自选`)
+    } catch { /* handled */ }
+  }
 }
 </script>
 
@@ -133,6 +154,8 @@ async function addWatchlist(code) {
   color: var(--color-text-muted); cursor: pointer; transition: all var(--transition-fast);
 }
 .result-star:hover { background: var(--color-primary-light); color: var(--color-primary); }
+.result-star.watched { color: #f59e0b; }
+.result-star.watched:hover { color: #d97706; }
 
 /* ── Empty / Loading ── */
 .empty-state {
