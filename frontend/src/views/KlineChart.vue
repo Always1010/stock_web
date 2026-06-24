@@ -48,6 +48,10 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
         加自选
       </button>
+      <button class="hero-refresh" :disabled="refreshing" @click="refreshData">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: refreshing }"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        {{ refreshing ? '更新中...' : '更新数据' }}
+      </button>
     </div>
 
     <!-- Range bar -->
@@ -74,6 +78,7 @@ const range = ref('6m')
 const chartRef = ref(null)
 let chart = null
 const klineData = ref([])
+const refreshing = ref(false)
 
 const ranges = [
   { key: '1m', label: '1月' }, { key: '3m', label: '3月' }, { key: '6m', label: '6月' },
@@ -114,12 +119,6 @@ function getDateRange() {
   return { start: new Date(today.getTime() - map[range.value] * 86400000).toISOString().slice(0, 10), end }
 }
 
-function calcRelChange(data) {
-  if (!data.length) return []
-  const latestClose = data[data.length - 1].close
-  return data.map(d => d.close ? +(((d.close - latestClose) / latestClose) * 100).toFixed(2) : null)
-}
-
 async function fetchData() {
   const { start, end } = getDateRange()
   const { data: res } = await stockApi.kline(code.value, start, end)
@@ -130,14 +129,13 @@ async function fetchData() {
   const dates = res.data.map(d => d.date)
   const ohlc = res.data.map(d => [d.open, d.close, d.low, d.high])
   const volumes = res.data.map(d => d.volume)
-  const relChanges = calcRelChange(res.data)
 
   if (!chart) chart = echarts.init(chartRef.value)
   chart.setOption({
     backgroundColor: '#fff',
     grid: [
-      { left: '8%', right: '12%', top: 20, height: '58%' },
-      { left: '8%', right: '12%', top: '78%', height: '15%' },
+      { left: '8%', right: '8%', top: 20, height: '58%' },
+      { left: '8%', right: '8%', top: '78%', height: '15%' },
     ],
     xAxis: [
       { type: 'category', data: dates, gridIndex: 0, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisTick: { show: false }, axisLabel: { show: false } },
@@ -146,11 +144,9 @@ async function fetchData() {
     yAxis: [
       { type: 'value', gridIndex: 0, scale: true, splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#9ca3af', fontSize: 10 } },
       { type: 'value', gridIndex: 1, splitLine: { show: false }, axisLabel: { color: '#9ca3af', fontSize: 10, formatter: v => v >= 1e8 ? (v/1e8).toFixed(1)+'亿' : (v/1e4).toFixed(0)+'万' } },
-      { type: 'value', gridIndex: 0, position: 'right', splitLine: { show: false }, axisLabel: { color: '#6366f1', fontSize: 9, formatter: v => v.toFixed(0) + '%' } },
     ],
     series: [
       { name: 'K线', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0, itemStyle: { color: '#e15241', color0: '#1aad56', borderColor: '#e15241', borderColor0: '#1aad56' } },
-      { name: '距今日', type: 'line', data: relChanges, xAxisIndex: 0, yAxisIndex: 2, smooth: true, symbol: 'none', lineStyle: { width: 1.5, color: '#6366f1', type: 'dashed' } },
       { name: '量', type: 'bar', data: volumes.map((v, i) => ({ value: v, itemStyle: { color: i > 0 && ohlc[i] ? (ohlc[i][1] >= ohlc[i-1][1] ? '#e15241' : '#1aad56') : '#e15241', opacity: 0.5 } })), xAxisIndex: 1, yAxisIndex: 1 },
     ],
     tooltip: {
@@ -181,10 +177,6 @@ async function fetchData() {
             rows.push(mk('振幅', amp) + '<span style="font-size:11px;color:#1e2130">%</span>')
           }
         }
-        const rel = relChanges[idx]
-        if (rel != null) {
-          rows.push(`<span style="display:inline-block;width:36px;color:#9ca3af;font-size:11px">距今日</span> <b style="color:${rel >= 0 ? '#e15241' : '#1aad56'}">${rel >= 0 ? '+' : ''}${rel}%</b>`)
-        }
         const vs = d.volume >= 1e8 ? (d.volume/1e8).toFixed(2)+'亿' : (d.volume/1e4).toFixed(0)+'万手'
         rows.push(`<span style="display:inline-block;width:36px;color:#9ca3af;font-size:11px">成交量</span> <b>${vs}</b>`)
         return rows.join('<br>')
@@ -194,6 +186,19 @@ async function fetchData() {
 }
 
 function addWatchlist() { watchlistApi.add(code.value).then(() => ElMessage.success('已添加到自选')) }
+
+async function refreshData() {
+  refreshing.value = true
+  try {
+    const { data: res } = await stockApi.refresh(code.value)
+    ElMessage.success(res.message || `已刷新 ${res.affected} 条数据`)
+    await fetchData()
+  } catch {
+    // error already shown by interceptor
+  } finally {
+    refreshing.value = false
+  }
+}
 
 watch(() => route.params.code, (newCode) => {
   if (newCode && newCode !== code.value) {
@@ -247,6 +252,17 @@ onUnmounted(() => { window.removeEventListener('resize', hr); chart?.dispose() }
   transition: all var(--transition-fast);
 }
 .hero-star:hover { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+.hero-refresh {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 32px; padding: 0 var(--space-3); border: 1px solid var(--color-border);
+  background: transparent; border-radius: var(--radius-sm); font-size: var(--text-xs);
+  font-weight: 500; cursor: pointer; font-family: inherit; color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+}
+.hero-refresh:hover:not(:disabled) { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+.hero-refresh:disabled { opacity: 0.6; cursor: not-allowed; }
+.spinning { animation: spin 0.8s linear infinite; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
 
 /* ── Range ── */
 .range-bar { display: flex; gap: 4px; background: var(--color-bg); padding: 4px; border-radius: var(--radius-sm); width: fit-content; margin-bottom: var(--space-4); }
