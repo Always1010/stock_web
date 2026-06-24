@@ -9,7 +9,7 @@ A股股票模拟交易系统。支持自选股管理、K线图表、多组合管
 | 前端 | Vue 3 + Vite + Element Plus + ECharts 5 |
 | 后端 | FastAPI + SQLAlchemy 2.0 + APScheduler |
 | 数据库 | MySQL 8.0 |
-| 数据源 | East Money API |
+| 数据源 | Sina Finance API |
 | 部署 | Nginx + uvicorn/gunicorn |
 
 ---
