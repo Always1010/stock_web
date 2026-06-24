@@ -96,6 +96,20 @@ def get_breadth(
         )
         for r in records
     ]
+
+    # Add ALL aggregate
+    if data:
+        all_total = sum(d.total for d in data)
+        all_up = sum(d.up_count for d in data)
+        all_down = sum(d.down_count for d in data)
+        all_flat = sum(d.flat_count for d in data)
+        data.insert(0, BreadthItem(
+            board="ALL", board_label="全市场",
+            total=all_total, up_count=all_up,
+            down_count=all_down, flat_count=all_flat,
+            trade_date=trade_date.isoformat(),
+        ))
+
     return BreadthResponse(data=data, trade_date=trade_date.isoformat())
 
 
