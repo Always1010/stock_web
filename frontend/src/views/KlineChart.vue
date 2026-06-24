@@ -61,14 +61,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { stockApi, watchlistApi } from '../api'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const code = route.params.code
+const code = ref(route.params.code)
 const stockName = ref('')
 const range = ref('6m')
 const chartRef = ref(null)
@@ -122,7 +122,7 @@ function calcRelChange(data) {
 
 async function fetchData() {
   const { start, end } = getDateRange()
-  const { data: res } = await stockApi.kline(code, start, end)
+  const { data: res } = await stockApi.kline(code.value, start, end)
   stockName.value = res.name
   klineData.value = res.data
   if (!res.data.length) return
@@ -193,7 +193,15 @@ async function fetchData() {
   }, true)
 }
 
-function addWatchlist() { watchlistApi.add(code).then(() => ElMessage.success('已添加到自选')) }
+function addWatchlist() { watchlistApi.add(code.value).then(() => ElMessage.success('已添加到自选')) }
+
+watch(() => route.params.code, (newCode) => {
+  if (newCode && newCode !== code.value) {
+    code.value = newCode
+    if (chart) { chart.dispose(); chart = null }
+    fetchData()
+  }
+})
 
 onMounted(fetchData)
 const hr = () => chart?.resize()
