@@ -25,6 +25,11 @@ SINA_KLINE = (
     "CN_MarketData.getKLineData"
 )
 
+# datalen strategy: full history (10000 ≈ all available, verified up to 8378 records / 1991)
+FULL_DATALEN = 10000
+# incremental buffer: 10 days covers weekends + long holidays
+INCR_DATALEN = 10
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -186,7 +191,29 @@ def crawl_stock_list(db: Session | None = None) -> dict:
 # K-line
 # ═══════════════════════════════════════════════════════════
 
-def crawl_kline_for_stock(stock: Stock, db: Session, datalen: int = 400) -> int:
+def _parse_date(date_str: str) -> date | None:
+    """Parse date from Sina K-line API response. Supports 'YYYYMMDD' and 'YYYY-MM-DD'."""
+    if not date_str:
+        return None
+    if len(date_str) == 8:
+        return date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+    elif "-" in date_str:
+        return date.fromisoformat(date_str)
+    return None
+
+
+def _get_stock_latest_date(stock_id: int, db: Session) -> date | None:
+    """Return the latest trade_date in DailyKline for a given stock, or None."""
+    from sqlalchemy import func as sqla_func
+
+    return (
+        db.query(sqla_func.max(DailyKline.trade_date))
+        .filter(DailyKline.stock_id == stock_id)
+        .scalar()
+    )
+
+
+def crawl_kline_for_stock(stock: Stock, db: Session, datalen: int = FULL_DATALEN) -> int:
     """
     Crawl daily K-line for one stock from Sina Finance.
     Returns number of new records inserted.
@@ -203,31 +230,39 @@ def crawl_kline_for_stock(stock: Stock, db: Session, datalen: int = 400) -> int:
         if not isinstance(data, list) or len(data) == 0:
             return 0
 
-        inserted = 0
+        # Parse API data into {trade_date: item} dict
+        new_records: dict[date, dict] = {}
         for item in data:
-            trade_date_str = item.get("day", "")
-            if len(trade_date_str) == 8:
-                trade_date = date(
-                    int(trade_date_str[:4]),
-                    int(trade_date_str[4:6]),
-                    int(trade_date_str[6:8]),
-                )
-            elif "-" in trade_date_str:
-                trade_date = date.fromisoformat(trade_date_str)
-            else:
-                continue
+            trade_date = _parse_date(item.get("day", ""))
+            if trade_date:
+                new_records[trade_date] = item
 
-            existing = (
-                db.query(DailyKline)
+        if not new_records:
+            return 0
+
+        # Batch query existing dates (1 query instead of N)
+        existing_dates: set[date] = set()
+        # SQLite/Mysql have limits on IN clause; chunk if needed
+        dates_list = list(new_records.keys())
+        chunk_size = 500
+        for i in range(0, len(dates_list), chunk_size):
+            chunk = dates_list[i : i + chunk_size]
+            rows = (
+                db.query(DailyKline.trade_date)
                 .filter(
                     DailyKline.stock_id == stock.id,
-                    DailyKline.trade_date == trade_date,
+                    DailyKline.trade_date.in_(chunk),
                 )
-                .first()
+                .all()
             )
-            if existing:
-                continue
+            existing_dates.update(r[0] for r in rows)
 
+        # Insert only missing dates
+        inserted = 0
+        for trade_date in sorted(new_records):
+            if trade_date in existing_dates:
+                continue
+            item = new_records[trade_date]
             kline = DailyKline(
                 stock_id=stock.id,
                 trade_date=trade_date,
@@ -241,7 +276,8 @@ def crawl_kline_for_stock(stock: Stock, db: Session, datalen: int = 400) -> int:
             db.add(kline)
             inserted += 1
 
-        db.commit()
+        if inserted > 0:
+            db.commit()
         return inserted
 
     except Exception as e:
@@ -267,6 +303,11 @@ def crawl_kline_on_demand(
 def crawl_all_kline(db: Session | None = None, limit: int | None = None) -> dict:
     """
     Crawl K-line for all active stocks. Rate-limited ~2 req/sec.
+
+    Smart datalen strategy per stock:
+      - No existing data → FULL_DATALEN (first-time full history)
+      - Already latest    → skip (no API call)
+      - Has gap           → gap_days + INCR_DATALEN (incremental)
     """
     close_db = False
     if db is None:
@@ -278,20 +319,43 @@ def crawl_all_kline(db: Session | None = None, limit: int | None = None) -> dict
         if limit:
             stocks = stocks[:limit]
 
+        # Latest date across ALL stocks in DB (market-level benchmark)
+        from sqlalchemy import func as sqla_func
+
+        latest_market_date = (
+            db.query(sqla_func.max(DailyKline.trade_date)).scalar()
+        )
+        today = date.today()
+
         total_inserted = 0
+        total_skipped = 0
         errors = 0
 
         for i, stock in enumerate(stocks):
             try:
-                inserted = crawl_kline_for_stock(stock, db)
-                total_inserted += inserted
-                if (i + 1) % 20 == 0:
-                    logger.info(
-                        f"K-line: {i+1}/{len(stocks)} stocks, {total_inserted} records"
-                    )
+                latest = _get_stock_latest_date(stock.id, db)
+
+                if latest is not None and latest_market_date is not None and latest >= latest_market_date:
+                    total_skipped += 1
+                else:
+                    if latest is None:
+                        datalen = FULL_DATALEN
+                    else:
+                        gap = (today - latest).days + INCR_DATALEN
+                        datalen = min(gap, FULL_DATALEN)
+
+                    inserted = crawl_kline_for_stock(stock, db, datalen=datalen)
+                    total_inserted += inserted
+
             except Exception as e:
                 errors += 1
                 logger.error(f"Error {stock.code}: {e}")
+
+            if (i + 1) % 50 == 0:
+                logger.info(
+                    f"K-line: {i+1}/{len(stocks)} stocks, "
+                    f"{total_inserted} inserted, {total_skipped} skipped, {errors} errors"
+                )
 
             time.sleep(0.5)
 
@@ -302,13 +366,19 @@ def crawl_all_kline(db: Session | None = None, limit: int | None = None) -> dict
             details={
                 "stocks_processed": len(stocks),
                 "records_inserted": total_inserted,
+                "stocks_skipped": total_skipped,
                 "errors": errors,
             },
         )
         db.add(log)
         db.commit()
 
-        return {"stocks": len(stocks), "inserted": total_inserted, "errors": errors}
+        return {
+            "stocks": len(stocks),
+            "inserted": total_inserted,
+            "skipped": total_skipped,
+            "errors": errors,
+        }
 
     finally:
         if close_db and db:

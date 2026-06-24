@@ -11,16 +11,19 @@ scheduler = BackgroundScheduler(timezone=settings.TIMEZONE)
 
 
 def _crawl_job():
-    """Daily crawl job: update stock list and K-line data."""
+    """Daily crawl job: update stock list and K-line data, then refresh market stats."""
     from app.database import SessionLocal
-    from app.services.crawler import crawl_all_kline, crawl_stock_list
+    from app.services.crawler import crawl_all_kline, crawl_all_market_data, crawl_stock_list
 
     logger.info("Scheduled crawl job starting...")
     db = SessionLocal()
     try:
         result_list = crawl_stock_list(db)
         result_kline = crawl_all_kline(db)
-        logger.info(f"Crawl job done: list={result_list}, kline={result_kline}")
+        result_market = crawl_all_market_data()
+        logger.info(
+            f"Crawl job done: list={result_list}, kline={result_kline}, market={result_market}"
+        )
     except Exception as e:
         logger.error(f"Crawl job failed: {e}")
     finally:
