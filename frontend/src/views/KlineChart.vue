@@ -35,14 +35,6 @@
         <span class="detail-label">成交额</span>
         <span class="detail-value">{{ fmtAmount(latestData.amount) }}</span>
       </div>
-      <button class="hero-star" @click="addWatchlist">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        加自选
-      </button>
-    </div>
-
-    <!-- Change indicators -->
-    <div class="change-card" v-if="latestData && klineData.length >= 2">
       <div class="detail-item">
         <span class="detail-label">涨幅</span>
         <span class="detail-value" :class="priceColor">{{ latestChangePct >= 0 ? '+' : '' }}{{ latestChangePct.toFixed(2) }}%</span>
@@ -52,11 +44,10 @@
         <span class="detail-value" v-if="amplitude != null">{{ amplitude.toFixed(2) }}%</span>
         <span class="detail-value" v-else>--</span>
       </div>
-      <div class="detail-item">
-        <span class="detail-label">距今日</span>
-        <span class="detail-value" v-if="relChangeStart != null" :class="relChangeStart <= 0 ? 'up' : 'down'">{{ relChangeStart <= 0 ? '' : '+' }}{{ relChangeStart.toFixed(2) }}%</span>
-        <span class="detail-value" v-else>--</span>
-      </div>
+      <button class="hero-star" @click="addWatchlist">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        加自选
+      </button>
     </div>
 
     <!-- Range bar -->
@@ -107,13 +98,6 @@ const amplitude = computed(() => {
   const prevClose = klineData.value[klineData.value.length - 2].close
   if (!prevClose) return null
   return +(((latestData.value.high - latestData.value.low) / prevClose) * 100).toFixed(2)
-})
-const relChangeStart = computed(() => {
-  if (klineData.value.length < 2) return null
-  const latest = klineData.value[klineData.value.length - 1].close
-  const first = klineData.value[0].close
-  if (!latest || !first) return null
-  return +(((first - latest) / latest) * 100).toFixed(2)
 })
 
 function fmtAmount(v) {
@@ -168,7 +152,40 @@ async function fetchData() {
       { name: '距今日', type: 'line', data: calcRelChange(res.data), xAxisIndex: 0, yAxisIndex: 2, smooth: true, symbol: 'none', lineStyle: { width: 1.5, color: '#6366f1', type: 'dashed' } },
       { name: '量', type: 'bar', data: volumes.map((v, i) => ({ value: v, itemStyle: { color: i > 0 && ohlc[i] ? (ohlc[i][1] >= ohlc[i-1][1] ? '#e15241' : '#1aad56') : '#e15241', opacity: 0.5 } })), xAxisIndex: 1, yAxisIndex: 1 },
     ],
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: '#fff', borderColor: '#e5e7eb', textStyle: { color: '#1e2130', fontSize: 12 } },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      backgroundColor: '#fff',
+      borderColor: '#e5e7eb',
+      textStyle: { color: '#1e2130', fontSize: 12 },
+      formatter(params) {
+        if (!params || !params.length) return ''
+        const idx = params[0].dataIndex
+        const d = res.data[idx]
+        let h = `<div style="font-weight:600;margin-bottom:4px;color:#374151">${d.date}</div>`
+        h += `<div>开 <b style="margin-left:8px">${d.open.toFixed(2)}</b>` +
+             `<span style="margin-left:12px">收 <b>${d.close.toFixed(2)}</b></span></div>`
+        h += `<div>高 <b style="margin-left:8px;color:#e15241">${d.high.toFixed(2)}</b>` +
+             `<span style="margin-left:12px">低 <b style="color:#1aad56">${d.low.toFixed(2)}</b></span></div>`
+        if (idx > 0) {
+          const prev = res.data[idx - 1].close
+          const chg = ((d.close - prev) / prev * 100)
+          const cc = chg >= 0 ? '#e15241' : '#1aad56'
+          h += `<div>涨幅 <b style="margin-left:8px;color:${cc}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</b>`
+          const amp = ((d.high - d.low) / prev * 100)
+          h += `<span style="margin-left:12px">振幅 <b>${amp.toFixed(2)}%</b></span></div>`
+        }
+        const rel = params[1]?.data
+        if (rel != null) {
+          const rc = rel >= 0 ? '#e15241' : '#1aad56'
+          h += `<div>距今日 <b style="margin-left:8px;color:${rc}">${rel >= 0 ? '+' : ''}${rel}%</b></div>`
+        }
+        const vol = d.volume
+        const vs = vol >= 1e8 ? (vol/1e8).toFixed(2)+'亿' : vol >= 1e4 ? (vol/1e4).toFixed(0)+'万手' : vol+'手'
+        h += `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #f3f4f6">量 <b style="margin-left:8px">${vs}</b></div>`
+        return h
+      },
+    },
   }, true)
 }
 
@@ -218,14 +235,6 @@ onUnmounted(() => { window.removeEventListener('resize', hr); chart?.dispose() }
   transition: all var(--transition-fast);
 }
 .hero-star:hover { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
-
-/* ── Change card ── */
-.change-card {
-  display: flex; align-items: center; gap: var(--space-6);
-  background: var(--color-surface); border-radius: var(--radius-lg);
-  padding: var(--space-3) var(--space-6); margin-bottom: var(--space-4);
-  box-shadow: var(--shadow-sm);
-}
 
 /* ── Range ── */
 .range-bar { display: flex; gap: 4px; background: var(--color-bg); padding: 4px; border-radius: var(--radius-sm); width: fit-content; margin-bottom: var(--space-4); }
