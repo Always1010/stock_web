@@ -130,3 +130,33 @@ a:hover { opacity: 0.8; }
   font-weight: 600;
   color: var(--color-text-primary);
 }
+
+/* ── Responsive ── */
+@media (max-width: 1280px) {
+  :root { --sidebar-width: 180px; }
+  .content { padding: var(--space-5); }
+}
+@media (max-width: 960px) {
+  :root { --sidebar-width: 60px; }
+  .sidebar-brand .brand-text,
+  .sidebar-nav .nav-item span:not(.nav-icon),
+  .sidebar-footer .user-name,
+  .sidebar-footer .user-role { display: none; }
+  .nav-item { justify-content: center; padding: 10px; }
+  .content { padding: var(--space-4); }
+  .stat-number { font-size: 1.5rem; }
+}
+@media (max-width: 640px) {
+  .sidebar { display: none; }
+  .main { margin-left: 0; }
+  .content { padding: var(--space-3); }
+  .page-title { font-size: var(--text-xl); }
+  .stat-grid { grid-template-columns: 1fr; }
+  .index-grid { grid-template-columns: 1fr 1fr; }
+  .action-grid { grid-template-columns: 1fr; }
+  .pf-grid { grid-template-columns: 1fr; }
+  .table-header, .table-row, .wl-header, .wl-row,
+  .st-header, .st-row, .ht-header, .ht-row {
+    font-size: var(--text-xs);
+  }
+}
