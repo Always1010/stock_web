@@ -159,31 +159,37 @@ async function fetchData() {
       borderColor: '#e5e7eb',
       textStyle: { color: '#1e2130', fontSize: 12 },
       formatter(params) {
-        if (!params || !params.length) return ''
+        if (!params?.length) return ''
         const idx = params[0].dataIndex
         const d = res.data[idx]
-        let h = `<div style="font-weight:600;margin-bottom:4px;color:#374151">${d.date}</div>`
-        h += `<div>开 <b style="margin-left:8px">${d.open.toFixed(2)}</b>` +
-             `<span style="margin-left:12px">收 <b>${d.close.toFixed(2)}</b></span></div>`
-        h += `<div>高 <b style="margin-left:8px;color:#e15241">${d.high.toFixed(2)}</b>` +
-             `<span style="margin-left:12px">低 <b style="color:#1aad56">${d.low.toFixed(2)}</b></span></div>`
+        const rows = [
+          `<div style="font-weight:600;margin-bottom:2px">${d.date}</div>`,
+          `${params[0].marker} K线`,
+        ]
+        const mk = (name, val, color) => `<span style="display:inline-block;width:36px;color:#9ca3af;font-size:11px">${name}</span> <b style="color:${color ?? '#1e2130'}">${val.toFixed(2)}</b>`
+        rows.push(mk('开盘', d.open))
+        rows.push(mk('收盘', d.close))
+        rows.push(mk('最高', d.high, '#e15241'))
+        rows.push(mk('最低', d.low, '#1aad56'))
         if (idx > 0) {
           const prev = res.data[idx - 1].close
-          const chg = ((d.close - prev) / prev * 100)
-          const cc = chg >= 0 ? '#e15241' : '#1aad56'
-          h += `<div>涨幅 <b style="margin-left:8px;color:${cc}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</b>`
-          const amp = ((d.high - d.low) / prev * 100)
-          h += `<span style="margin-left:12px">振幅 <b>${amp.toFixed(2)}%</b></span></div>`
+          if (prev) {
+            const chg = ((d.close - prev) / prev * 100)
+            const cc = chg >= 0 ? '#e15241' : '#1aad56'
+            rows.push(mk('涨幅', chg, cc) + '<span style="font-size:11px;color:#9ca3af">%</span>')
+            const amp = ((d.high - d.low) / prev * 100)
+            rows.push(mk('振幅', amp) + '<span style="font-size:11px;color:#9ca3af">%</span>')
+          }
         }
         const rel = params[1]?.data
         if (rel != null) {
-          const rc = rel >= 0 ? '#e15241' : '#1aad56'
-          h += `<div>距今日 <b style="margin-left:8px;color:${rc}">${rel >= 0 ? '+' : ''}${rel}%</b></div>`
+          rows.push(`${params[1].marker} 距今日 <b style="color:${rel >= 0 ? '#e15241' : '#1aad56'}">${rel >= 0 ? '+' : ''}${rel}%</b>`)
         }
-        const vol = d.volume
-        const vs = vol >= 1e8 ? (vol/1e8).toFixed(2)+'亿' : vol >= 1e4 ? (vol/1e4).toFixed(0)+'万手' : vol+'手'
-        h += `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #f3f4f6">量 <b style="margin-left:8px">${vs}</b></div>`
-        return h
+        if (params[2]) {
+          const vs = d.volume >= 1e8 ? (d.volume/1e8).toFixed(2)+'亿' : (d.volume/1e4).toFixed(0)+'万手'
+          rows.push(`${params[2].marker} 量 <b>${vs}</b>`)
+        }
+        return rows.join('<br>')
       },
     },
   }, true)
