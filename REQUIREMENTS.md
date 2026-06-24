@@ -10,7 +10,8 @@
 6. [模块五：股票组合（核心）](#6-模块五股票组合核心)
 7. [模块六：组合图表分析](#7-模块六组合图表分析)
 8. [模块七：首页仪表盘](#8-模块七首页仪表盘)
-9. [附录：API 清单](#9-附录api-清单)
+10. [附录 A：API 清单](#10-附录aapi-清单)
+11. [附录 B：数据库结构](#11-附录-b数据库结构)
 
 ---
 
@@ -375,7 +376,7 @@ cum_return_rate = (total_market_value / total_cost) - 1
 
 ---
 
-## 9. 附录：API 清单
+## 9. 附录 A：API 清单
 
 ### 认证
 
@@ -422,3 +423,493 @@ cum_return_rate = (total_market_value / total_cost) - 1
 | GET | `/api/portfolios/{code}/nav?start=&end=` | 净值历史（收益曲线） |
 | GET | `/api/portfolios/{code}/daily-returns?year=` | 每日收益率（热力图） |
 | GET | `/api/portfolios/{code}/contributions?start=&end=` | 贡献分析 |
+
+---
+
+## 10. 附录 B：数据库结构
+
+### 10.1 实体关系图 (ER)
+
+```
+users (1) ────── (N) watchlist_items (N) ────── (1) stocks (1) ────── (N) daily_kline
+users (1) ────── (N) portfolios (1) ────── (N) portfolio_holdings (N) ────── (1) stocks
+portfolios (1) ────── (N) portfolio_nav_history
+```
+
+**关系说明**：
+
+| 关系 | 类型 | 说明 |
+|------|------|------|
+| users → watchlist_items | 1:N | 一个用户有多个自选股 |
+| stocks → watchlist_items | 1:N | 一只股票可被多个用户添加为自选 |
+| users → portfolios | 1:N | 一个用户可创建多个组合 |
+| portfolios → portfolio_holdings | 1:N | 一个组合包含多个持仓 |
+| stocks → portfolio_holdings | 1:N | 一只股票可被多个组合持有 |
+| portfolios → portfolio_nav_history | 1:N | 一个组合每天产生一条净值记录 |
+| stocks → daily_kline | 1:N | 一只股票每天产生一条K线记录 |
+
+### 10.2 表结构详细说明
+
+#### 表 1: `users` — 用户表
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INT | PK, AUTO_INCREMENT | 用户唯一标识 |
+| `username` | VARCHAR(64) | UNIQUE, NOT NULL, INDEX | 登录用户名 |
+| `password_hash` | VARCHAR(256) | NOT NULL | bcrypt 哈希密码 |
+| `created_at` | DATETIME | NOT NULL, DEFAULT NOW() | 注册时间 |
+
+```sql
+CREATE TABLE users (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    username        VARCHAR(64)  NOT NULL UNIQUE,
+    password_hash   VARCHAR(256) NOT NULL,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_username (username)
+);
+```
+
+#### 表 2: `stocks` — A 股股票主表
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INT | PK, AUTO_INCREMENT | 内部 ID |
+| `code` | VARCHAR(6) | UNIQUE, NOT NULL, INDEX | 股票代码，如 `600519` |
+| `exchange` | ENUM('SH','SZ','BJ') | NOT NULL | 交易所：上海/深圳/北京 |
+| `name` | VARCHAR(64) | NOT NULL | 股票中文名称 |
+| `is_active` | TINYINT(1) | NOT NULL, DEFAULT 1 | 是否活跃（0=已退市） |
+| `created_at` | DATETIME | NOT NULL, DEFAULT NOW() | 首次入库时间 |
+| `updated_at` | DATETIME | NOT NULL, ON UPDATE NOW() | 最后更新时间 |
+
+```sql
+CREATE TABLE stocks (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    code            VARCHAR(6)   NOT NULL UNIQUE,
+    exchange        ENUM('SH','SZ','BJ') NOT NULL,
+    name            VARCHAR(64)  NOT NULL,
+    is_active       TINYINT(1)   NOT NULL DEFAULT 1,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_code (code)
+);
+```
+
+**交易所代码规则**：
+
+| 前缀 | 交易所 | exchange 值 |
+|------|--------|-------------|
+| `6xxxxx` | 上海证券交易所 | `SH` |
+| `0xxxxx`, `3xxxxx` | 深圳证券交易所 | `SZ` |
+| `4xxxxx`, `8xxxxx` | 北京证券交易所 | `BJ` |
+
+#### 表 3: `daily_kline` — 日 K 线数据
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INT | PK, AUTO_INCREMENT | — |
+| `stock_id` | INT | FK → stocks.id, NOT NULL, INDEX | 关联股票 |
+| `trade_date` | DATE | NOT NULL | 交易日期 |
+| `open` | DECIMAL(10,3) | NOT NULL | 开盘价 |
+| `high` | DECIMAL(10,3) | NOT NULL | 最高价 |
+| `low` | DECIMAL(10,3) | NOT NULL | 最低价 |
+| `close` | DECIMAL(10,3) | NOT NULL | 收盘价 |
+| `volume` | BIGINT | NOT NULL | 成交量（股数） |
+| `amount` | DECIMAL(18,2) | NOT NULL | 成交额（元） |
+
+**唯一约束**：`UNIQUE (stock_id, trade_date)` — 一只股票每天只有一条记录
+
+```sql
+CREATE TABLE daily_kline (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    stock_id        INT           NOT NULL,
+    trade_date      DATE          NOT NULL,
+    open            DECIMAL(10,3) NOT NULL,
+    high            DECIMAL(10,3) NOT NULL,
+    low             DECIMAL(10,3) NOT NULL,
+    close           DECIMAL(10,3) NOT NULL,
+    volume          BIGINT        NOT NULL,
+    amount          DECIMAL(18,2) NOT NULL,
+    UNIQUE KEY uk_stock_date (stock_id, trade_date),
+    INDEX idx_stock_date (stock_id, trade_date),
+    FOREIGN KEY (stock_id) REFERENCES stocks(id)
+);
+```
+
+**数据估算**：
+- A 股总数约 5,500 只
+- 每只股票每年约 250 个交易日
+- 10 年数据：5,500 × 250 × 10 ≈ 1,375 万条记录
+- 单条记录约 80 字节 → 总数据量约 1.1 GB（不含索引）
+- 加上索引约 1.7 GB
+
+#### 表 4: `watchlist_items` — 用户自选股
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INT | PK, AUTO_INCREMENT | — |
+| `user_id` | INT | FK → users.id, NOT NULL, INDEX | 用户 |
+| `stock_id` | INT | FK → stocks.id, NOT NULL | 股票 |
+| `added_at` | DATETIME | NOT NULL, DEFAULT NOW() | 添加时间 |
+
+**唯一约束**：`UNIQUE (user_id, stock_id)` — 同一用户不能重复添加同一股票
+
+```sql
+CREATE TABLE watchlist_items (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT      NOT NULL,
+    stock_id        INT      NOT NULL,
+    added_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_user_stock (user_id, stock_id),
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (stock_id) REFERENCES stocks(id)
+);
+```
+
+#### 表 5: `portfolios` — 股票组合
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INT | PK, AUTO_INCREMENT | 内部 ID |
+| `user_id` | INT | FK → users.id, NOT NULL, INDEX | 所属用户 |
+| `name` | VARCHAR(128) | NOT NULL | 组合名称（用户自定义） |
+| `code` | VARCHAR(20) | UNIQUE, NOT NULL | 系统自动生成，如 `PF20260624001` |
+| `created_at` | DATETIME | NOT NULL, DEFAULT NOW() | 创建时间 |
+| `updated_at` | DATETIME | NOT NULL, ON UPDATE NOW() | 最后修改时间 |
+
+```sql
+CREATE TABLE portfolios (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT          NOT NULL,
+    name            VARCHAR(128) NOT NULL,
+    code            VARCHAR(20)  NOT NULL UNIQUE,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+
+**组合代码生成规则**：
+
+```
+PF{YYYYMMDD}{NNN}
+
+- PF：固定前缀
+- YYYYMMDD：创建日期
+- NNN：当日序号，从 001 开始递增
+
+示例：2026 年 6 月 24 日创建的第 1 个组合 → PF20260624001
+      同一天创建的第 2 个组合         → PF20260624002
+```
+
+代码生成逻辑位于 `backend/app/services/portfolio_service.py` → `generate_portfolio_code()`。
+
+#### 表 6: `portfolio_holdings` — 组合持仓
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INT | PK, AUTO_INCREMENT | — |
+| `portfolio_id` | INT | FK → portfolios.id ON DELETE CASCADE, NOT NULL, INDEX | 所属组合 |
+| `stock_id` | INT | FK → stocks.id, NOT NULL | 股票 |
+| `shares` | DECIMAL(10,2) | NOT NULL | 持有股数 |
+| `cost_price` | DECIMAL(10,3) | NULL | 成本价（NULL=未设定） |
+| `cost_price_set_at` | DATETIME | NULL | 成本价设定时间 |
+| `created_at` | DATETIME | NOT NULL, DEFAULT NOW() | 添加时间 |
+
+**唯一约束**：`UNIQUE (portfolio_id, stock_id)` — 同一组合不能重复持有同一股票
+
+**关键设计**：
+- `cost_price` 默认为 NULL，表示"尚未设定"
+- 一旦写入非 NULL 值 → **此后不可修改**（业务层强制）
+- `cost_price_set_at` 记录设定时间，用于审计追溯
+- 删除组合时级联删除 (`ON DELETE CASCADE`)
+
+```sql
+CREATE TABLE portfolio_holdings (
+    id                INT AUTO_INCREMENT PRIMARY KEY,
+    portfolio_id      INT            NOT NULL,
+    stock_id          INT            NOT NULL,
+    shares            DECIMAL(10,2)  NOT NULL,
+    cost_price        DECIMAL(10,3)  NULL,
+    cost_price_set_at DATETIME       NULL,
+    created_at        DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_portfolio_stock (portfolio_id, stock_id),
+    INDEX idx_portfolio (portfolio_id),
+    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE,
+    FOREIGN KEY (stock_id) REFERENCES stocks(id)
+);
+```
+
+#### 表 7: `portfolio_nav_history` — 组合净值历史
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INT | PK, AUTO_INCREMENT | — |
+| `portfolio_id` | INT | FK → portfolios.id ON DELETE CASCADE, NOT NULL, INDEX | 所属组合 |
+| `nav_date` | DATE | NOT NULL | 净值日期 |
+| `nav` | DECIMAL(18,3) | NOT NULL | 当日净值（= 总市值） |
+| `daily_return` | DECIMAL(18,3) | NULL | 日收益额（nav - 昨日nav） |
+| `daily_return_rate` | DECIMAL(10,6) | NULL | 日收益率（(nav/昨日nav) - 1） |
+| `cum_return_rate` | DECIMAL(10,6) | NULL | 累计收益率（(nav/total_cost) - 1） |
+| `total_cost` | DECIMAL(18,3) | NOT NULL, DEFAULT 0 | 总成本（Σ shares × cost_price） |
+| `total_market_value` | DECIMAL(18,3) | NOT NULL, DEFAULT 0 | 总市值（Σ shares × close） |
+| `created_at` | DATETIME | NOT NULL, DEFAULT NOW() | 记录时间 |
+
+**唯一约束**：`UNIQUE (portfolio_id, nav_date)` — 每个组合每天一条记录
+
+```sql
+CREATE TABLE portfolio_nav_history (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    portfolio_id        INT            NOT NULL,
+    nav_date            DATE           NOT NULL,
+    nav                 DECIMAL(18,3)  NOT NULL,
+    daily_return        DECIMAL(18,3)  NULL,
+    daily_return_rate   DECIMAL(10,6)  NULL,
+    cum_return_rate     DECIMAL(10,6)  NULL,
+    total_cost          DECIMAL(18,3)  NOT NULL DEFAULT 0,
+    total_market_value  DECIMAL(18,3)  NOT NULL DEFAULT 0,
+    created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_portfolio_date (portfolio_id, nav_date),
+    INDEX idx_portfolio_date (portfolio_id, nav_date),
+    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE
+);
+```
+
+**可空字段说明**：
+
+| 字段 | 何时为 NULL |
+|------|-------------|
+| `daily_return`, `daily_return_rate` | 组合首次计算净值时无昨日数据 |
+| `cum_return_rate` | 所有持仓的 `cost_price` 均未设定 |
+
+#### 表 8: `crawl_log` — 数据爬取日志
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INT | PK, AUTO_INCREMENT | — |
+| `crawl_type` | VARCHAR(32) | NOT NULL, INDEX | 爬取类型：`stock_list` / `daily_kline` |
+| `ref_date` | DATE | NOT NULL | 爬取目标日期 |
+| `status` | VARCHAR(16) | NOT NULL | 状态：`success` / `partial` / `failed` |
+| `details` | JSON | NULL | 详细结果（新增/更新数量、错误信息等） |
+| `created_at` | DATETIME | NOT NULL, DEFAULT NOW() | 记录时间 |
+
+```sql
+CREATE TABLE crawl_log (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    crawl_type      VARCHAR(32)  NOT NULL,
+    ref_date        DATE         NOT NULL,
+    status          VARCHAR(16)  NOT NULL,
+    details         JSON         NULL,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_type_date (crawl_type, ref_date)
+);
+```
+
+### 10.3 关键业务约束
+
+#### 成本价不可变
+
+```
+portfolio_holdings.cost_price
+  │
+  ├─ 初始状态：NULL
+  │
+  ├─ 首次设定（用户提供 或 系统自动计算）
+  │   └─ 写入 cost_price + cost_price_set_at
+  │       └─ 🚫 之后任何 UPDATE 被拒绝
+  │
+  └─ 保护层级：
+      ├─ API 层：holding.is_cost_locked → True → 返回 400
+      └─ 前端层：按钮隐藏 + "成本已锁定" 标签
+```
+
+#### 唯一性约束汇总
+
+| 表 | 唯一约束 | 含义 |
+|----|----------|------|
+| `users` | `UNIQUE(username)` | 用户名不可重复 |
+| `stocks` | `UNIQUE(code)` | 股票代码不可重复 |
+| `daily_kline` | `UNIQUE(stock_id, trade_date)` | 每只股票每天一条 K 线 |
+| `watchlist_items` | `UNIQUE(user_id, stock_id)` | 同一用户不重复自选 |
+| `portfolios` | `UNIQUE(code)` | 组合代码全局唯一 |
+| `portfolio_holdings` | `UNIQUE(portfolio_id, stock_id)` | 同一组合不重复持仓 |
+| `portfolio_nav_history` | `UNIQUE(portfolio_id, nav_date)` | 每个组合每天一条净值 |
+
+#### 级联删除
+
+| 外键 | ON DELETE | 效果 |
+|------|-----------|------|
+| `portfolio_holdings.portfolio_id` | `CASCADE` | 删除组合 → 自动删除所有持仓 |
+| `portfolio_nav_history.portfolio_id` | `CASCADE` | 删除组合 → 自动删除所有净值历史 |
+
+### 10.4 实体关系 SQL（完整 DDL）
+
+<details>
+<summary>点击展开完整建表 SQL</summary>
+
+```sql
+-- ============================================================
+-- 1. 用户表
+-- ============================================================
+CREATE TABLE users (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    username        VARCHAR(64)  NOT NULL UNIQUE,
+    password_hash   VARCHAR(256) NOT NULL,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 2. 股票主表
+-- ============================================================
+CREATE TABLE stocks (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    code            VARCHAR(6)   NOT NULL UNIQUE,
+    exchange        ENUM('SH','SZ','BJ') NOT NULL,
+    name            VARCHAR(64)  NOT NULL,
+    is_active       TINYINT(1)   NOT NULL DEFAULT 1,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 3. 日 K 线表
+-- ============================================================
+CREATE TABLE daily_kline (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    stock_id        INT           NOT NULL,
+    trade_date      DATE          NOT NULL,
+    open            DECIMAL(10,3) NOT NULL,
+    high            DECIMAL(10,3) NOT NULL,
+    low             DECIMAL(10,3) NOT NULL,
+    close           DECIMAL(10,3) NOT NULL,
+    volume          BIGINT        NOT NULL,
+    amount          DECIMAL(18,2) NOT NULL,
+    UNIQUE KEY uk_stock_date (stock_id, trade_date),
+    INDEX idx_stock_date (stock_id, trade_date),
+    FOREIGN KEY (stock_id) REFERENCES stocks(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 4. 自选股表
+-- ============================================================
+CREATE TABLE watchlist_items (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT      NOT NULL,
+    stock_id        INT      NOT NULL,
+    added_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_user_stock (user_id, stock_id),
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (stock_id) REFERENCES stocks(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 5. 组合表
+-- ============================================================
+CREATE TABLE portfolios (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT          NOT NULL,
+    name            VARCHAR(128) NOT NULL,
+    code            VARCHAR(20)  NOT NULL UNIQUE,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 6. 组合持仓表
+-- ============================================================
+CREATE TABLE portfolio_holdings (
+    id                INT AUTO_INCREMENT PRIMARY KEY,
+    portfolio_id      INT            NOT NULL,
+    stock_id          INT            NOT NULL,
+    shares            DECIMAL(10,2)  NOT NULL,
+    cost_price        DECIMAL(10,3)  NULL,
+    cost_price_set_at DATETIME       NULL,
+    created_at        DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_portfolio_stock (portfolio_id, stock_id),
+    INDEX idx_portfolio (portfolio_id),
+    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE,
+    FOREIGN KEY (stock_id) REFERENCES stocks(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 7. 组合净值历史表
+-- ============================================================
+CREATE TABLE portfolio_nav_history (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    portfolio_id        INT            NOT NULL,
+    nav_date            DATE           NOT NULL,
+    nav                 DECIMAL(18,3)  NOT NULL,
+    daily_return        DECIMAL(18,3)  NULL,
+    daily_return_rate   DECIMAL(10,6)  NULL,
+    cum_return_rate     DECIMAL(10,6)  NULL,
+    total_cost          DECIMAL(18,3)  NOT NULL DEFAULT 0,
+    total_market_value  DECIMAL(18,3)  NOT NULL DEFAULT 0,
+    created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_portfolio_date (portfolio_id, nav_date),
+    INDEX idx_portfolio_date (portfolio_id, nav_date),
+    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 8. 爬取日志表
+-- ============================================================
+CREATE TABLE crawl_log (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    crawl_type      VARCHAR(32)  NOT NULL,
+    ref_date        DATE         NOT NULL,
+    status          VARCHAR(16)  NOT NULL,
+    details         JSON         NULL,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_type_date (crawl_type, ref_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+</details>
+
+### 10.5 数据流示意
+
+#### 净值计算流程
+
+```
+APScheduler @ 15:05 CST
+  │
+  ▼
+对每个 Portfolio：
+  │
+  ├─ 遍历 portfolio_holdings
+  │   │
+  │   ├─ 查 daily_kline 取每个 stock 的最新 close
+  │   ├─ market_value = shares × close
+  │   └─ cost_basis   = shares × cost_price (如果有)
+  │
+  ├─ nav = Σ market_value
+  ├─ total_cost = Σ cost_basis
+  │
+  ├─ 查 portfolio_nav_history 取昨日记录
+  │   ├─ daily_return = nav - yesterday_nav
+  │   └─ daily_return_rate = daily_return / yesterday_nav
+  │
+  ├─ cum_return_rate = (nav / total_cost) - 1
+  │
+  └─ UPSERT → portfolio_nav_history
+```
+
+#### 成本价设定流程
+
+```
+POST /api/portfolios/{code}/holdings
+  │
+  ├─ 用户传了 cost_price？
+  │   └─ YES → 直接写入，锁定
+  │
+  └─ NO → 自动计算
+        │
+        ├─ 当前 CST < 15:00 → 取上一交易日 close
+        └─ 当前 CST ≥ 15:00 → 取当日 close（回退到最近交易日）
+```
