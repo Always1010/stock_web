@@ -23,6 +23,11 @@ const routes = [
         component: () => import('../views/Dashboard.vue'),
       },
       {
+        path: 'market',
+        name: 'MarketOverview',
+        component: () => import('../views/MarketOverview.vue'),
+      },
+      {
         path: 'stocks',
         name: 'StockSearch',
         component: () => import('../views/StockSearch.vue'),

@@ -27,13 +27,13 @@
         <div class="stat-hint">个</div>
       </div>
 
-      <div class="stat-card" @click="$router.push('/stocks')">
+      <div class="stat-card" @click="$router.push('/market')">
         <div class="stat-icon" style="background:#f0fdf4">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
         </div>
-        <div class="stat-label">A 股市场</div>
+        <div class="stat-label">市场行情</div>
         <div class="stat-number">{{ stockCount }}</div>
-        <div class="stat-hint">只股票</div>
+        <div class="stat-hint">只A股</div>
       </div>
     </div>
 
@@ -73,6 +73,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { stockApi, watchlistApi, portfolioApi } from '../api'
+import api from '../api'
 
 const auth = useAuthStore()
 const watchlistCount = ref(0)
@@ -89,11 +90,11 @@ const greeting = computed(() => {
 onMounted(async () => {
   try {
     const [w, p, s] = await Promise.all([
-      watchlistApi.list(), portfolioApi.list(), stockApi.search(''),
+      watchlistApi.list(), portfolioApi.list(), api.get('/stocks/count'),
     ])
     watchlistCount.value = w.data.items.length
     portfolioCount.value = p.data.length
-    stockCount.value = s.data.items.length
+    stockCount.value = s.data.count
   } catch { /* ignore */ }
 })
 </script>
