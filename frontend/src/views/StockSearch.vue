@@ -10,7 +10,7 @@
         placeholder="输入股票代码或名称进行搜索..."
         @input="handleSearch"
       />
-      <span v-if="query" class="search-clear" @click="query='';results=[]">
+      <span v-if="query" class="search-clear" @click="clearSearch">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </span>
     </div>
@@ -53,10 +53,12 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { stockApi, watchlistApi } from '../api'
 import { ElMessage } from 'element-plus'
 
+const route = useRoute()
 const query = ref('')
 const results = ref([])
 const loading = ref(false)
@@ -71,6 +73,27 @@ function handleSearch() {
     finally { loading.value = false }
   }, 300)
 }
+
+function clearSearch() {
+  clearTimeout(timer)
+  query.value = ''
+  results.value = []
+}
+
+// Accept ?q= query param from route
+onMounted(() => {
+  if (route.query.q) {
+    query.value = route.query.q
+    handleSearch()
+  }
+})
+
+watch(() => route.query.q, (newQ) => {
+  if (newQ && newQ !== query.value) {
+    query.value = newQ
+    handleSearch()
+  }
+})
 
 async function addWatchlist(code) {
   try { await watchlistApi.add(code); ElMessage.success(`已添加 ${code} 到自选`) }
