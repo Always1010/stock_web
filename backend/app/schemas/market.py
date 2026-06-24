@@ -68,3 +68,16 @@ class IndexKlineResponse(BaseModel):
     code: str
     name: str
     data: list[IndexKlineItem]
+
+
+class TurnoverItem(BaseModel):
+    trade_date: str
+    total_amount: float
+    total_volume: int
+    stock_count: int
+
+    model_config = {"from_attributes": True}
+
+
+class TurnoverResponse(BaseModel):
+    data: list[TurnoverItem]

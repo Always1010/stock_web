@@ -49,6 +49,19 @@
       </div>
     </div>
 
+    <!-- Turnover -->
+    <div v-if="turnover.length" class="section">
+      <h3 class="section-title">市场总成交额</h3>
+      <div class="turnover-summary" @click="showTurnoverChart = !showTurnoverChart" style="cursor:pointer">
+        <div class="to-amount">{{ formatAmount(currentTurnover?.total_amount) }}</div>
+        <div class="to-change" :class="{ up: turnoverChange >= 0, down: turnoverChange < 0 }">
+          较前日 {{ turnoverChange >= 0 ? '+' : '' }}{{ formatAmount(Math.abs(turnoverChange)) }}
+          <span style="font-size:11px;color:var(--color-text-muted);margin-left:4px">点击查看变化曲线</span>
+        </div>
+      </div>
+      <div v-if="showTurnoverChart" ref="turnoverChartRef" style="width:100%;height:280px;margin-top:var(--space-3)"></div>
+    </div>
+
     <!-- Sector Ranking -->
     <div v-if="sectors.length" class="section">
       <h3 class="section-title">行业板块</h3>
@@ -78,7 +91,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import * as echarts from 'echarts'
 import api from '../api'
 
 const indices = ref([])
@@ -86,6 +100,16 @@ const breadth = ref([])
 const sectors = ref([])
 const breadthDate = ref('')
 const sectorDate = ref('')
+const turnover = ref([])
+const showTurnoverChart = ref(false)
+const turnoverChartRef = ref(null)
+let turnoverChart = null
+
+const currentTurnover = computed(() => turnover.value.length ? turnover.value[turnover.value.length - 1] : null)
+const turnoverChange = computed(() => {
+  if (turnover.value.length < 2) return 0
+  return currentTurnover.value.total_amount - turnover.value[turnover.value.length - 2].total_amount
+})
 
 // Show ALL aggregate by default, individual boards as toggle
 const filteredBreadth = computed(() => {
@@ -93,18 +117,51 @@ const filteredBreadth = computed(() => {
   return all.length ? all : breadth.value
 })
 
+function formatAmount(val) {
+  if (!val) return '--'
+  if (val >= 1e12) return (val / 1e12).toFixed(2) + ' 万亿'
+  if (val >= 1e8) return (val / 1e8).toFixed(2) + ' 亿'
+  return (val / 1e4).toFixed(0) + ' 万'
+}
+
+async function renderTurnoverChart() {
+  if (!turnoverChartRef.value) return
+  const data = turnover.value
+  if (!data.length) return
+
+  if (!turnoverChart) turnoverChart = echarts.init(turnoverChartRef.value)
+
+  const amounts = data.map(d => +(d.total_amount / 1e8).toFixed(0))
+  turnoverChart.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#e5e7eb', textStyle: { color: '#1e2130' },
+      formatter: p => `${p[0].axisValue}<br/>成交额: ${p[0].value} 亿` },
+    grid: { left: '8%', right: '5%', top: 10, bottom: 10 },
+    xAxis: { type: 'category', data: data.map(d => d.trade_date), axisLabel: { color: '#9ca3af', fontSize: 10 } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#9ca3af', fontSize: 10, formatter: '{value}亿' } },
+    series: [{
+      type: 'bar', data: amounts,
+      itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
+      emphasis: { itemStyle: { color: '#2563eb' } },
+    }],
+  }, true)
+}
+
+watch(showTurnoverChart, async (v) => { if (v) { await nextTick(); renderTurnoverChart() } })
+
 onMounted(async () => {
   try {
-    const [ir, br, sr] = await Promise.all([
+    const [ir, br, sr, tr] = await Promise.all([
       api.get('/market/indices'),
       api.get('/market/breadth'),
       api.get('/market/sectors', { params: { limit: 20 } }),
+      api.get('/market/turnover', { params: { days: 60 } }),
     ])
     indices.value = ir.data.data
     breadth.value = br.data.data
     breadthDate.value = br.data.trade_date
     sectors.value = sr.data.data
     sectorDate.value = sr.data.trade_date
+    turnover.value = tr.data.data
   } catch { /* ignore */ }
 })
 </script>
@@ -190,4 +247,16 @@ onMounted(async () => {
 .st-row.up .st-pct { color: var(--color-up); }
 .st-row.down .st-pct { color: var(--color-down); }
 .st-lead { color: var(--color-text-secondary); font-size: var(--text-xs); }
+
+/* ── Turnover ── */
+.turnover-summary {
+  background: var(--color-surface); border-radius: var(--radius-lg);
+  padding: var(--space-5); border: 1px solid var(--color-border);
+  transition: all var(--transition-fast);
+}
+.turnover-summary:hover { border-color: var(--color-primary); box-shadow: var(--shadow-md); }
+.to-amount { font-family: var(--font-mono); font-size: 28px; font-weight: 700; }
+.to-change { font-size: var(--text-sm); margin-top: 4px; }
+.to-change.up { color: var(--color-up); }
+.to-change.down { color: var(--color-down); }
 </style>
