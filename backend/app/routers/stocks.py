@@ -41,11 +41,11 @@ def _get_price_info(stock_id: int, db: Session) -> tuple[float | None, float | N
 @router.get("", response_model=StockSearchResponse)
 def search_stocks(
     q: str = Query("", description="Search query: code or name"),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int | None = Query(None, ge=1, le=500, description="Max results, omit for all"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Search stocks by code or name."""
+    """Search stocks by code or name. Returns all matches unless limit is set."""
     query = db.query(Stock).filter(Stock.is_active == 1)
 
     if q:
@@ -53,7 +53,7 @@ def search_stocks(
             (Stock.code.like(f"%{q}%")) | (Stock.name.like(f"%{q}%"))
         )
 
-    stocks = query.limit(limit).all()
+    stocks = query.limit(limit).all() if limit else query.all()
     items = []
     for s in stocks:
         close, change_pct = _get_price_info(s.id, db)
