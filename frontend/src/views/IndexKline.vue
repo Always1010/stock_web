@@ -44,16 +44,6 @@ function getDateRange() {
   return { start: new Date(today.getTime() - map[range.value] * 86400000).toISOString().slice(0, 10), end }
 }
 
-function calcMA(data, period) {
-  const r = []
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) { r.push(null); continue }
-    let s = 0; for (let j = 0; j < period; j++) s += data[i - j][4]
-    r.push(+(s / period).toFixed(2))
-  }
-  return r
-}
-
 async function fetchData() {
   const { start, end } = getDateRange()
   const { data: res } = await api.get(`/market/indices/${idxCode}/kline`, { params: { start, end } })
@@ -85,9 +75,6 @@ async function fetchData() {
         type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
         itemStyle: { color: '#e15241', color0: '#1aad56', borderColor: '#e15241', borderColor0: '#1aad56' },
       },
-      { type: 'line', data: calcMA(res.data, 5), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#f59e0b' } },
-      { type: 'line', data: calcMA(res.data, 10), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#3b82f6' } },
-      { type: 'line', data: calcMA(res.data, 20), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#8b5cf6' } },
       {
         type: 'bar', data: volumes.map((v, i) => ({
           value: v,
