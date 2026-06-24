@@ -10,9 +10,11 @@
         @focus="onFocus"
         @blur="onBlur"
         @keydown.escape="close"
-        @keydown.enter="selectFirst"
+        @keydown.enter.prevent="handleEnter"
+        @keydown.up.prevent="moveUp"
+        @keydown.down.prevent="moveDown"
       />
-      <span v-if="query" class="ssb-clear" @mousedown.prevent="query='';results=[]">
+      <span v-if="query" class="ssb-clear" @mousedown.prevent="close()">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </span>
     </div>
@@ -21,8 +23,9 @@
       <div v-if="loading" class="ssb-loading">搜索中...</div>
       <div v-else-if="results.length === 0" class="ssb-empty">无匹配结果</div>
       <div
-        v-for="s in results" :key="s.code"
+        v-for="(s, i) in results" :key="s.code"
         class="ssb-row"
+        :class="{ highlighted: highlightIndex === i }"
         @mousedown.prevent="selectStock(s)"
       >
         <div class="ssb-info">
@@ -51,7 +54,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockApi, watchlistApi } from '../api'
 import { ElMessage } from 'element-plus'
@@ -61,6 +64,7 @@ const query = ref('')
 const results = ref([])
 const loading = ref(false)
 const showDropdown = ref(false)
+const highlightIndex = ref(-1)
 const rootRef = ref(null)
 const inputRef = ref(null)
 
@@ -68,6 +72,7 @@ let timer = null
 
 watch(query, () => {
   clearTimeout(timer)
+  highlightIndex.value = -1
   if (!query.value.trim()) { results.value = []; showDropdown.value = false; return }
   timer = setTimeout(async () => {
     loading.value = true
@@ -75,6 +80,7 @@ watch(query, () => {
     try {
       const { data } = await stockApi.search(query.value.trim())
       results.value = data.items
+      highlightIndex.value = -1
     } finally {
       loading.value = false
     }
@@ -82,16 +88,57 @@ watch(query, () => {
 })
 
 function onFocus() { if (query.value.trim()) showDropdown.value = true }
+
 function onBlur() { setTimeout(() => { showDropdown.value = false }, 150) }
-function close() { showDropdown.value = false; query.value = '' }
+
+function close() {
+  clearTimeout(timer)
+  showDropdown.value = false
+  query.value = ''
+  results.value = []
+  highlightIndex.value = -1
+}
 
 function selectStock(s) {
   close()
   router.push(`/stocks/${s.code}/kline`)
 }
 
-function selectFirst() {
-  if (results.value.length > 0) selectStock(results.value[0])
+function moveUp() {
+  if (!showDropdown.value || results.value.length === 0) return
+  highlightIndex.value = highlightIndex.value <= 0 ? results.value.length - 1 : highlightIndex.value - 1
+  scrollToHighlighted()
+}
+
+function moveDown() {
+  if (!showDropdown.value || results.value.length === 0) return
+  highlightIndex.value = highlightIndex.value >= results.value.length - 1 ? 0 : highlightIndex.value + 1
+  scrollToHighlighted()
+}
+
+function handleEnter() {
+  if (!showDropdown.value || results.value.length === 0) {
+    // No dropdown open or no results — navigate to search page
+    if (query.value.trim()) {
+      router.push({ path: '/stocks', query: { q: query.value.trim() } })
+      close()
+    }
+    return
+  }
+  if (highlightIndex.value >= 0 && highlightIndex.value < results.value.length) {
+    selectStock(results.value[highlightIndex.value])
+  } else {
+    // Enter without arrow-key selection → search page with all results
+    router.push({ path: '/stocks', query: { q: query.value.trim() } })
+    close()
+  }
+}
+
+function scrollToHighlighted() {
+  nextTick(() => {
+    const el = rootRef.value?.querySelector('.ssb-row.highlighted')
+    el?.scrollIntoView({ block: 'nearest' })
+  })
 }
 
 async function addWatchlist(code) {
@@ -139,6 +186,7 @@ async function addWatchlist(code) {
 }
 .ssb-row:last-child { border-bottom: none; }
 .ssb-row:hover { background: var(--color-bg); }
+.ssb-row.highlighted { background: var(--color-primary-light); }
 
 .ssb-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
 .ssb-code { font-family: var(--font-mono); font-weight: 600; font-size: 13px; }
