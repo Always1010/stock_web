@@ -346,6 +346,7 @@ def crawl_all_kline(db: Session | None = None, limit: int | None = None) -> dict
 
                     inserted = crawl_kline_for_stock(stock, db, datalen=datalen)
                     total_inserted += inserted
+                    time.sleep(0.5)  # rate-limit only when making API calls
 
             except Exception as e:
                 errors += 1
@@ -356,8 +357,6 @@ def crawl_all_kline(db: Session | None = None, limit: int | None = None) -> dict
                     f"K-line: {i+1}/{len(stocks)} stocks, "
                     f"{total_inserted} inserted, {total_skipped} skipped, {errors} errors"
                 )
-
-            time.sleep(0.5)
 
         log = CrawlLog(
             crawl_type="daily_kline",
