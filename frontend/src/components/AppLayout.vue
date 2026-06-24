@@ -2,11 +2,12 @@
   <div class="shell">
     <!-- Sidebar -->
     <aside class="sidebar" :class="{ collapsed }">
-      <div class="sidebar-brand" @click="$router.push('/')">
+      <div class="sidebar-brand" @click="collapsed = !collapsed" :title="collapsed ? '展开菜单' : '收起菜单'">
         <div class="brand-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
         </div>
         <span class="brand-text">StockSim</span>
+        <svg class="brand-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline v-if="collapsed" points="9 18 15 12 9 6"/><polyline v-else points="15 18 9 12 15 6"/></svg>
       </div>
 
       <nav class="sidebar-nav">
@@ -38,15 +39,6 @@
           <span class="nav-label">我的组合</span>
         </router-link>
       </nav>
-
-      <!-- Toggle button -->
-      <button class="collapse-btn" @click="collapsed = !collapsed" :title="collapsed ? '展开菜单' : '收起菜单'">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline v-if="collapsed" points="9 18 15 12 9 6"/>
-          <polyline v-else points="15 18 9 12 15 6"/>
-        </svg>
-        <span v-if="!collapsed" class="collapse-text">收起</span>
-      </button>
 
       <div class="sidebar-footer">
         <div class="user-card">
@@ -87,11 +79,10 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import StockSearchBar from './StockSearchBar.vue'
 
-const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const collapsed = ref(false)
@@ -124,9 +115,11 @@ function handleLogout() {
 
 .sidebar-brand {
   display: flex; align-items: center; gap: 10px;
-  padding: 20px 16px 28px;
+  padding: 20px 16px 20px;
   cursor: pointer; user-select: none; overflow: hidden;
+  transition: padding var(--transition-base);
 }
+.collapsed .sidebar-brand { padding: 20px 16px; justify-content: center; }
 .brand-icon {
   width: 32px; height: 32px; flex-shrink: 0;
   background: linear-gradient(135deg, #3b82f6, #2563eb);
@@ -138,9 +131,13 @@ function handleLogout() {
   transition: opacity var(--transition-base);
 }
 .collapsed .brand-text { opacity: 0; width: 0; overflow: hidden; }
+.brand-arrow {
+  color: var(--color-sidebar-text); flex-shrink: 0; opacity: 0.6;
+  transition: opacity var(--transition-base); margin-left: auto;
+}
+.collapsed .brand-arrow { opacity: 0; width: 0; overflow: hidden; }
 
 .sidebar-nav { flex: 1; padding: 0 12px; display: flex; flex-direction: column; gap: 2px; }
-
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; border-radius: 8px;
@@ -155,20 +152,6 @@ function handleLogout() {
 .nav-label { transition: opacity var(--transition-base); }
 .collapsed .nav-label { opacity: 0; width: 0; overflow: hidden; }
 
-/* ── Collapse toggle ── */
-.collapse-btn {
-  display: flex; align-items: center; gap: 8px;
-  width: calc(100% - 24px); margin: 0 12px 8px;
-  padding: 8px 12px; border: none; background: transparent;
-  border-radius: 8px; color: var(--color-sidebar-text);
-  cursor: pointer; font-family: inherit; font-size: 12px;
-  transition: all var(--transition-fast); overflow: hidden;
-}
-.collapse-btn:hover { background: var(--color-sidebar-hover); color: #d1d5db; }
-.collapse-btn svg { flex-shrink: 0; }
-.collapse-text { white-space: nowrap; }
-.collapsed .collapse-text { opacity: 0; width: 0; overflow: hidden; }
-
 /* Sidebar footer */
 .sidebar-footer { padding: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
 .user-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; overflow: hidden; }
@@ -181,13 +164,18 @@ function handleLogout() {
 .user-name { font-size: 13px; color: #e5e7eb; font-weight: 500; white-space: nowrap; }
 .user-role { font-size: 11px; color: var(--color-sidebar-text); white-space: nowrap; }
 
-/* ── Main ── */
+/* ── Main (width calc to match collapsed state) ── */
 .main {
-  flex: 1; margin-left: var(--sidebar-width);
+  margin-left: var(--sidebar-width);
+  width: calc(100vw - var(--sidebar-width));
   display: flex; flex-direction: column; min-height: 100vh;
-  transition: margin-left var(--transition-base);
+  transition: margin-left var(--transition-base), width var(--transition-base);
+  overflow-x: hidden;
 }
-.main.collapsed { margin-left: 64px; }
+.main.collapsed {
+  margin-left: 64px;
+  width: calc(100vw - 64px);
+}
 
 /* ── Topbar ── */
 .topbar {
@@ -209,5 +197,5 @@ function handleLogout() {
 .btn-icon:hover { background: var(--color-bg); color: var(--color-text-primary); }
 
 /* ── Content ── */
-.content { flex: 1; padding: var(--space-8); max-width: 1280px; width: 100%; }
+.content { flex: 1; padding: var(--space-8); }
 </style>
