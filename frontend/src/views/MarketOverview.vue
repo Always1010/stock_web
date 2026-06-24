@@ -25,7 +25,7 @@
       <h3 class="section-title">市场涨跌统计</h3>
       <p class="section-date">数据日期：{{ breadthDate }}</p>
       <div class="breadth-grid">
-        <div v-for="b in breadth" :key="b.board" class="breadth-card">
+        <div v-for="b in filteredBreadth" :key="b.board" class="breadth-card">
           <div class="b-board">{{ b.board_label }}</div>
           <div class="b-bar-wrap">
             <div class="b-bar">
@@ -78,7 +78,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '../api'
 
 const indices = ref([])
@@ -86,6 +86,12 @@ const breadth = ref([])
 const sectors = ref([])
 const breadthDate = ref('')
 const sectorDate = ref('')
+
+// Show ALL aggregate by default, individual boards as toggle
+const filteredBreadth = computed(() => {
+  const all = breadth.value.filter(b => b.board === 'ALL')
+  return all.length ? all : breadth.value
+})
 
 onMounted(async () => {
   try {
