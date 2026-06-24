@@ -28,7 +28,8 @@ def _crawl_job():
 
 
 def _nav_update_job():
-    """Daily NAV update job: calculate NAV for all portfolios."""
+    """Daily NAV update job: calculate NAV, crawl market data."""
+    from app.services.crawler import crawl_all_market_data
     from app.services.portfolio_service import update_all_portfolios_nav
 
     logger.info("Scheduled NAV update job starting...")
@@ -37,6 +38,13 @@ def _nav_update_job():
         logger.info(f"NAV update job done: {result}")
     except Exception as e:
         logger.error(f"NAV update job failed: {e}")
+
+    logger.info("Scheduled market data crawl starting...")
+    try:
+        result = crawl_all_market_data()
+        logger.info(f"Market data crawl done: {result}")
+    except Exception as e:
+        logger.error(f"Market data crawl failed: {e}")
 
 
 def start_scheduler():
