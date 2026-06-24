@@ -39,7 +39,7 @@ export const authApi = {
 
 // ── Stocks ────────────────────────────────────────
 export const stockApi = {
-  search: (q) => api.get('/stocks', { params: { q } }),
+  search: (q, limit) => api.get('/stocks', { params: { q, ...(limit ? { limit } : {}) } }),
   detail: (code) => api.get(`/stocks/${code}`),
   kline: (code, start, end) => api.get(`/stocks/${code}/kline`, { params: { start, end } }),
 }
