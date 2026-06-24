@@ -78,7 +78,7 @@ watch(query, () => {
     loading.value = true
     showDropdown.value = true
     try {
-      const { data } = await stockApi.search(query.value.trim())
+      const { data } = await stockApi.search(query.value.trim(), 10)
       results.value = data.items
       highlightIndex.value = -1
     } finally {
