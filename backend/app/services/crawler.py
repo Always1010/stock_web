@@ -213,10 +213,14 @@ def _get_stock_latest_date(stock_id: int, db: Session) -> date | None:
     )
 
 
-def crawl_kline_for_stock(stock: Stock, db: Session, datalen: int = FULL_DATALEN) -> int:
+def crawl_kline_for_stock(
+    stock: Stock, db: Session, datalen: int = FULL_DATALEN, overwrite: bool = False
+) -> int:
     """
     Crawl daily K-line for one stock from Sina Finance.
-    Returns number of new records inserted.
+
+    When overwrite=False (default): insert only missing dates, returns new records count.
+    When overwrite=True: upsert all fetched data (insert new + update existing), returns total affected.
     """
     params = {
         "symbol": _sina_symbol(stock.code),
@@ -240,49 +244,97 @@ def crawl_kline_for_stock(stock: Stock, db: Session, datalen: int = FULL_DATALEN
         if not new_records:
             return 0
 
-        # Batch query existing dates (1 query instead of N)
-        existing_dates: set[date] = set()
-        # SQLite/Mysql have limits on IN clause; chunk if needed
-        dates_list = list(new_records.keys())
-        chunk_size = 500
-        for i in range(0, len(dates_list), chunk_size):
-            chunk = dates_list[i : i + chunk_size]
-            rows = (
-                db.query(DailyKline.trade_date)
-                .filter(
-                    DailyKline.stock_id == stock.id,
-                    DailyKline.trade_date.in_(chunk),
+        if overwrite:
+            # ── Overwrite mode: batch-fetch existing rows, upsert ──
+            dates_list = list(new_records.keys())
+            existing_map: dict[date, DailyKline] = {}
+            chunk_size = 500
+            for i in range(0, len(dates_list), chunk_size):
+                chunk = dates_list[i : i + chunk_size]
+                rows = (
+                    db.query(DailyKline)
+                    .filter(
+                        DailyKline.stock_id == stock.id,
+                        DailyKline.trade_date.in_(chunk),
+                    )
+                    .all()
                 )
-                .all()
-            )
-            existing_dates.update(r[0] for r in rows)
+                for r in rows:
+                    existing_map[r.trade_date] = r
 
-        # Insert only missing dates
-        inserted = 0
-        for trade_date in sorted(new_records):
-            if trade_date in existing_dates:
-                continue
-            item = new_records[trade_date]
-            close = float(item["close"])
-            volume = int(item["volume"])
-            # Sina K-line API does not return amount; compute from volume × close
-            amount = float(item.get("amount", 0) or 0) or (close * volume)
-            kline = DailyKline(
-                stock_id=stock.id,
-                trade_date=trade_date,
-                open=float(item["open"]),
-                high=float(item["high"]),
-                low=float(item["low"]),
-                close=close,
-                volume=volume,
-                amount=amount,
-            )
-            db.add(kline)
-            inserted += 1
+            affected = 0
+            for trade_date in sorted(new_records):
+                item = new_records[trade_date]
+                close = float(item["close"])
+                volume = int(item["volume"])
+                amount = float(item.get("amount", 0) or 0) or (close * volume)
 
-        if inserted > 0:
-            db.commit()
-        return inserted
+                if trade_date in existing_map:
+                    row = existing_map[trade_date]
+                    row.open = float(item["open"])
+                    row.high = float(item["high"])
+                    row.low = float(item["low"])
+                    row.close = close
+                    row.volume = volume
+                    row.amount = amount
+                else:
+                    db.add(DailyKline(
+                        stock_id=stock.id,
+                        trade_date=trade_date,
+                        open=float(item["open"]),
+                        high=float(item["high"]),
+                        low=float(item["low"]),
+                        close=close,
+                        volume=volume,
+                        amount=amount,
+                    ))
+                affected += 1
+
+            if affected > 0:
+                db.commit()
+            return affected
+
+        else:
+            # ── Insert-only mode (default) ──
+            existing_dates: set[date] = set()
+            dates_list = list(new_records.keys())
+            chunk_size = 500
+            for i in range(0, len(dates_list), chunk_size):
+                chunk = dates_list[i : i + chunk_size]
+                rows = (
+                    db.query(DailyKline.trade_date)
+                    .filter(
+                        DailyKline.stock_id == stock.id,
+                        DailyKline.trade_date.in_(chunk),
+                    )
+                    .all()
+                )
+                existing_dates.update(r[0] for r in rows)
+
+            inserted = 0
+            for trade_date in sorted(new_records):
+                if trade_date in existing_dates:
+                    continue
+                item = new_records[trade_date]
+                close = float(item["close"])
+                volume = int(item["volume"])
+                amount = float(item.get("amount", 0) or 0) or (close * volume)
+                kline = DailyKline(
+                    stock_id=stock.id,
+                    trade_date=trade_date,
+                    open=float(item["open"]),
+                    high=float(item["high"]),
+                    low=float(item["low"]),
+                    close=close,
+                    volume=volume,
+                    amount=amount,
+                )
+                db.add(kline)
+                inserted += 1
+
+            if inserted > 0:
+                db.commit()
+            return inserted
 
     except Exception as e:
         logger.warning(f"Failed to crawl K-line for {stock.code}: {e}")
