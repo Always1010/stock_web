@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models.crawl import CrawlLog
-from app.models.market import MarketBreadth, MarketIndex, SectorData
+from app.models.market import IndexKline, MarketBreadth, MarketIndex, MarketTurnover, SectorData
 from app.models.stock import DailyKline, Stock
 
 logger = logging.getLogger(__name__)
@@ -263,15 +263,19 @@ def crawl_kline_for_stock(stock: Stock, db: Session, datalen: int = FULL_DATALEN
             if trade_date in existing_dates:
                 continue
             item = new_records[trade_date]
+            close = float(item["close"])
+            volume = int(item["volume"])
+            # Sina K-line API does not return amount; compute from volume × close
+            amount = float(item.get("amount", 0) or 0) or (close * volume)
             kline = DailyKline(
                 stock_id=stock.id,
                 trade_date=trade_date,
                 open=float(item["open"]),
                 high=float(item["high"]),
                 low=float(item["low"]),
-                close=float(item["close"]),
-                volume=int(item["volume"]),
-                amount=float(item.get("amount", 0) or 0),
+                close=close,
+                volume=volume,
+                amount=amount,
             )
             db.add(kline)
             inserted += 1
@@ -593,6 +597,8 @@ def crawl_all_market_data() -> dict:
         except Exception as e: r["sectors"] = {"error": str(e)}
         try: r["index_kline"] = crawl_index_kline_all(db)
         except Exception as e: r["index_kline"] = {"error": str(e)}
+        try: r["turnover"] = crawl_market_turnover(db)
+        except Exception as e: r["turnover"] = {"error": str(e)}
         return r
     finally:
         db.close()
@@ -681,7 +687,6 @@ def crawl_market_turnover(db: Session | None = None) -> dict:
         db = SessionLocal()
         close_db = True
     try:
-        from app.models.market import MarketTurnover
         from sqlalchemy import func as sqla_func
 
         # Get latest date with K-line data
