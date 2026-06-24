@@ -1,28 +1,58 @@
 <template>
   <div>
-    <div class="kline-top">
-      <div>
-        <h1 class="page-title" style="margin-bottom:2px">{{ stockName }}</h1>
-        <span class="stock-code">{{ code }}</span>
+    <!-- Price Hero -->
+    <div class="kline-hero" v-if="latestData">
+      <div class="hero-left">
+        <div class="hero-name">{{ stockName }}</div>
+        <div class="hero-code">{{ code }}</div>
       </div>
-      <button class="btn-star" @click="addWatchlist">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <div class="hero-right">
+        <div class="hero-price" :class="priceColor">
+          {{ latestData.close.toFixed(2) }}
+        </div>
+        <div class="hero-change" v-if="latestChange != null" :class="priceColor">
+          {{ latestChange >= 0 ? '+' : '' }}{{ latestChange.toFixed(2) }} ({{ latestChangePct >= 0 ? '+' : '' }}{{ latestChangePct.toFixed(2) }}%)
+        </div>
+        <div class="hero-change" v-else style="color:var(--color-text-muted)">--</div>
+      </div>
+    </div>
+
+    <!-- Detail row -->
+    <div class="kline-detail-row" v-if="latestData">
+      <div class="detail-item">
+        <span class="detail-label">开盘</span>
+        <span class="detail-value">{{ latestData.open.toFixed(2) }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">最高</span>
+        <span class="detail-value" :class="latestData.high > latestData.open ? 'up' : ''">{{ latestData.high.toFixed(2) }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">最低</span>
+        <span class="detail-value" :class="latestData.low < latestData.open ? 'down' : ''">{{ latestData.low.toFixed(2) }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">成交额</span>
+        <span class="detail-value">{{ fmtAmount(latestData.amount) }}</span>
+      </div>
+      <button class="hero-star" @click="addWatchlist">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
         加自选
       </button>
     </div>
 
+    <!-- Range bar -->
     <div class="range-bar">
-      <button v-for="r in ranges" :key="r.key" class="range-btn" :class="{ active: range === r.key }" @click="range=r.key;fetchData()">
-        {{ r.label }}
-      </button>
+      <button v-for="r in ranges" :key="r.key" class="range-btn" :class="{ active: range === r.key }" @click="range=r.key;fetchData()">{{ r.label }}</button>
     </div>
 
+    <!-- Chart -->
     <div ref="chartRef" class="chart-container"></div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { stockApi, watchlistApi } from '../api'
@@ -34,14 +64,33 @@ const stockName = ref('')
 const range = ref('6m')
 const chartRef = ref(null)
 let chart = null
+const klineData = ref([])
 
 const ranges = [
-  { key: '1m', label: '1月' },
-  { key: '3m', label: '3月' },
-  { key: '6m', label: '6月' },
-  { key: '1y', label: '1年' },
-  { key: 'all', label: '全部' },
+  { key: '1m', label: '1月' }, { key: '3m', label: '3月' }, { key: '6m', label: '6月' },
+  { key: '1y', label: '1年' }, { key: 'all', label: '全部' },
 ]
+
+const latestData = computed(() => klineData.value.length ? klineData.value[klineData.value.length - 1] : null)
+const latestChange = computed(() => latestData.value && klineData.value.length >= 2 ? latestData.value.close - klineData.value[klineData.value.length - 2].close : null)
+const latestChangePct = computed(() => {
+  if (!latestChange.value || klineData.value.length < 2) return null
+  const prev = klineData.value[klineData.value.length - 2].close
+  return prev ? (latestChange.value / prev * 100) : null
+})
+const priceColor = computed(() => {
+  if (latestChange.value == null) return ''
+  if (latestChange.value > 0) return 'up'
+  if (latestChange.value < 0) return 'down'
+  return ''
+})
+
+function fmtAmount(v) {
+  if (!v || v === 0) return '--'
+  if (v >= 1e8) return (v / 1e8).toFixed(2) + '亿'
+  if (v >= 1e4) return (v / 1e4).toFixed(0) + '万'
+  return v.toString()
+}
 
 function getDateRange() {
   const today = new Date()
@@ -64,6 +113,7 @@ async function fetchData() {
   const { start, end } = getDateRange()
   const { data: res } = await stockApi.kline(code, start, end)
   stockName.value = res.name
+  klineData.value = res.data
   if (!res.data.length) return
 
   const dates = res.data.map(d => d.date)
@@ -71,7 +121,6 @@ async function fetchData() {
   const volumes = res.data.map(d => d.volume)
 
   if (!chart) chart = echarts.init(chartRef.value)
-
   chart.setOption({
     backgroundColor: '#fff',
     grid: [
@@ -87,41 +136,17 @@ async function fetchData() {
       { type: 'value', gridIndex: 1, splitLine: { show: false }, axisLabel: { color: '#9ca3af', fontSize: 10, formatter: v => v >= 1e8 ? (v/1e8).toFixed(1)+'亿' : (v/1e4).toFixed(0)+'万' } },
     ],
     series: [
-      {
-        name: 'K线', type: 'candlestick', data: ohlc,
-        xAxisIndex: 0, yAxisIndex: 0,
-        itemStyle: { color: '#e15241', color0: '#1aad56', borderColor: '#e15241', borderColor0: '#1aad56' },
-      },
+      { name: 'K线', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0, itemStyle: { color: '#e15241', color0: '#1aad56', borderColor: '#e15241', borderColor0: '#1aad56' } },
       { name: 'MA5', type: 'line', data: calcMA(res.data, 5), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#f59e0b' } },
       { name: 'MA10', type: 'line', data: calcMA(res.data, 10), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#3b82f6' } },
       { name: 'MA20', type: 'line', data: calcMA(res.data, 20), xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#8b5cf6' } },
-      {
-        name: '量', type: 'bar', data: volumes.map((v, i) => ({
-          value: v,
-          itemStyle: { color: i > 0 && ohlc[i] ? (ohlc[i][1] >= ohlc[i - 1][1] ? '#e15241' : '#1aad56') : '#e15241', opacity: 0.5 },
-        })),
-        xAxisIndex: 1, yAxisIndex: 1,
-      },
+      { name: '量', type: 'bar', data: volumes.map((v, i) => ({ value: v, itemStyle: { color: i > 0 && ohlc[i] ? (ohlc[i][1] >= ohlc[i-1][1] ? '#e15241' : '#1aad56') : '#e15241', opacity: 0.5 } })), xAxisIndex: 1, yAxisIndex: 1 },
     ],
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-      backgroundColor: '#fff',
-      borderColor: '#e5e7eb',
-      textStyle: { color: '#1e2130', fontSize: 12 },
-      formatter(ps) {
-        if (!ps || !ps.length) return ''
-        const d = ps[0].data
-        return `<div style="font-weight:600;margin-bottom:4px">${ps[0].axisValue}</div>
-          开 ${d[1]}<br/>收 ${d[2]}<br/>低 ${d[3]}<br/>高 ${d[4]}`
-      },
-    },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: '#fff', borderColor: '#e5e7eb', textStyle: { color: '#1e2130', fontSize: 12 } },
   }, true)
 }
 
-function addWatchlist() {
-  watchlistApi.add(code).then(() => ElMessage.success('已添加到自选'))
-}
+function addWatchlist() { watchlistApi.add(code).then(() => ElMessage.success('已添加到自选')) }
 
 onMounted(fetchData)
 const hr = () => chart?.resize()
@@ -130,72 +155,49 @@ onUnmounted(() => { window.removeEventListener('resize', hr); chart?.dispose() }
 </script>
 
 <style scoped>
-.kline-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--space-4);
-}
-.stock-code {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  background: var(--color-bg);
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.btn-star {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 var(--space-4);
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all var(--transition-fast);
-}
-.btn-star:hover { background: #dbeafe; }
-
-.range-bar {
-  display: flex;
-  gap: 4px;
-  background: var(--color-bg);
-  padding: 4px;
-  border-radius: var(--radius-sm);
-  width: fit-content;
-  margin-bottom: var(--space-4);
-}
-.range-btn {
-  padding: 6px 16px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  font-weight: 500;
-  transition: all var(--transition-fast);
-}
-.range-btn.active {
-  background: var(--color-surface);
-  color: var(--color-text-primary);
+/* ── Hero ── */
+.kline-hero {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--color-surface); border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-6); margin-bottom: var(--space-4);
   box-shadow: var(--shadow-sm);
 }
+.hero-name { font-size: var(--text-lg); font-weight: 600; }
+.hero-code { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); margin-top: 2px; }
+.hero-right { text-align: right; }
+.hero-price { font-family: var(--font-mono); font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.hero-price.up { color: var(--color-up); }
+.hero-price.down { color: var(--color-down); }
+.hero-change { font-size: var(--text-sm); margin-top: 2px; }
+.hero-change.up { color: var(--color-up); }
+.hero-change.down { color: var(--color-down); }
+
+/* ── Detail row ── */
+.kline-detail-row {
+  display: flex; align-items: center; gap: var(--space-6);
+  background: var(--color-surface); border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-6); margin-bottom: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+.detail-item { display: flex; flex-direction: column; gap: 2px; }
+.detail-label { font-size: 10px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.detail-value { font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.detail-value.up { color: var(--color-up); }
+.detail-value.down { color: var(--color-down); }
+.hero-star {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  height: 32px; padding: 0 var(--space-3); border: 1px solid var(--color-border);
+  background: transparent; border-radius: var(--radius-sm); font-size: var(--text-xs);
+  font-weight: 500; cursor: pointer; font-family: inherit; color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+}
+.hero-star:hover { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+
+/* ── Range ── */
+.range-bar { display: flex; gap: 4px; background: var(--color-bg); padding: 4px; border-radius: var(--radius-sm); width: fit-content; margin-bottom: var(--space-4); }
+.range-btn { padding: 6px 16px; border: none; background: transparent; border-radius: 6px; font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; font-family: inherit; font-weight: 500; transition: all var(--transition-fast); }
+.range-btn.active { background: var(--color-surface); color: var(--color-text-primary); box-shadow: var(--shadow-sm); }
 .range-btn:hover:not(.active) { color: var(--color-text-primary); }
 
-.chart-container {
-  width: 100%;
-  height: 540px;
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  padding: var(--space-3);
-}
+.chart-container { width: 100%; height: 540px; background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: var(--space-3); }
 </style>
