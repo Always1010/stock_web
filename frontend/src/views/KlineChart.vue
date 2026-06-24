@@ -176,14 +176,14 @@ async function fetchData() {
           if (prev) {
             const chg = ((d.close - prev) / prev * 100)
             const cc = chg >= 0 ? '#e15241' : '#1aad56'
-            rows.push(mk('涨幅', chg, cc) + '<span style="font-size:11px;color:#9ca3af">%</span>')
+            rows.push(mk('涨幅', chg, cc) + `<span style="font-size:11px;color:${cc}">%</span>`)
             const amp = ((d.high - d.low) / prev * 100)
-            rows.push(mk('振幅', amp) + '<span style="font-size:11px;color:#9ca3af">%</span>')
+            rows.push(mk('振幅', amp) + '<span style="font-size:11px;color:#1e2130">%</span>')
           }
         }
         const rel = params[1]?.data
         if (rel != null) {
-          rows.push(`${params[1].marker} 距今日 <b style="color:${rel >= 0 ? '#e15241' : '#1aad56'}">${rel >= 0 ? '+' : ''}${rel}%</b>`)
+          rows.push(`距今日 <b style="color:${rel >= 0 ? '#e15241' : '#1aad56'}">${rel >= 0 ? '+' : ''}${rel}%</b>`)
         }
         const vs = d.volume >= 1e8 ? (d.volume/1e8).toFixed(2)+'亿' : (d.volume/1e4).toFixed(0)+'万手'
         rows.push(`<span style="display:inline-block;width:36px;color:#9ca3af;font-size:11px">成交量</span> <b>${vs}</b>`)
