@@ -522,6 +522,80 @@ def crawl_all_market_data() -> dict:
         except Exception as e: r["breadth"] = {"error": str(e)}
         try: r["sectors"] = crawl_sectors(db)
         except Exception as e: r["sectors"] = {"error": str(e)}
+        try: r["index_kline"] = crawl_index_kline_all(db)
+        except Exception as e: r["index_kline"] = {"error": str(e)}
         return r
     finally:
         db.close()
+
+
+# ═══════════════════════════════════════════════════════════
+# Index K-line
+# ═══════════════════════════════════════════════════════════
+
+def crawl_index_kline(code: str, name: str, db: Session, datalen: int = 400) -> int:
+    """Crawl daily K-line for a market index. Returns inserted count."""
+    symbol = code  # Already in Sina format: sh000001, sz399001
+
+    params = {
+        "symbol": symbol,
+        "scale": "240",
+        "ma": "no",
+        "datalen": str(datalen),
+    }
+
+    try:
+        data = _http_get_json(SINA_KLINE, params)
+        if not isinstance(data, list) or len(data) == 0:
+            return 0
+
+        inserted = 0
+        for item in data:
+            trade_date_str = item.get("day", "")
+            if len(trade_date_str) == 8:
+                td = date(int(trade_date_str[:4]), int(trade_date_str[4:6]), int(trade_date_str[6:8]))
+            elif "-" in trade_date_str:
+                td = date.fromisoformat(trade_date_str)
+            else:
+                continue
+
+            existing = (
+                db.query(IndexKline)
+                .filter(IndexKline.code == code, IndexKline.trade_date == td)
+                .first()
+            )
+            if existing:
+                continue
+
+            db.add(IndexKline(
+                code=code, name=name, trade_date=td,
+                open=float(item["open"]), high=float(item["high"]),
+                low=float(item["low"]), close=float(item["close"]),
+                volume=int(float(item["volume"])),
+                amount=float(item.get("amount", 0) or 0),
+            ))
+            inserted += 1
+
+        db.commit()
+        return inserted
+    except Exception as e:
+        logger.warning(f"Failed to crawl index K-line for {code}: {e}")
+        return 0
+
+
+def crawl_index_kline_all(db: Session | None = None) -> dict:
+    """Crawl K-line for all tracked indices."""
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        total = 0
+        for cfg in INDEX_CONFIG:
+            n = crawl_index_kline(cfg["code"], cfg["name"], db)
+            total += n
+            time.sleep(0.3)
+        return {"indices": len(INDEX_CONFIG), "records": total}
+    finally:
+        if close_db and db:
+            db.close()

@@ -5,7 +5,7 @@
 
     <!-- Index Cards -->
     <div class="index-grid">
-      <div v-for="idx in indices" :key="idx.code" class="index-card" :class="{ up: idx.change >= 0, down: idx.change < 0 }">
+      <div v-for="idx in indices" :key="idx.code" class="index-card" :class="{ up: idx.change >= 0, down: idx.change < 0 }" @click="$router.push(`/market/indices/${idx.code}`)" style="cursor:pointer">
         <div class="idx-name">{{ idx.name }}</div>
         <div class="idx-close">{{ idx.close.toFixed(2) }}</div>
         <div class="idx-change">

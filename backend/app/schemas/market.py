@@ -52,3 +52,19 @@ class SectorItem(BaseModel):
 class SectorResponse(BaseModel):
     data: list[SectorItem]
     trade_date: str
+
+
+class IndexKlineItem(BaseModel):
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    amount: float
+
+
+class IndexKlineResponse(BaseModel):
+    code: str
+    name: str
+    data: list[IndexKlineItem]
