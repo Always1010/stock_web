@@ -110,6 +110,10 @@ stock_web/
 users (1) ────── (N) watchlist_items (N) ────── (1) stocks (1) ────── (N) daily_kline
 users (1) ────── (N) portfolios (1) ────── (N) portfolio_holdings (N) ────── (1) stocks
 portfolios (1) ────── (N) portfolio_nav_history
+
+market_index      — standalone daily snapshots
+market_breadth    — standalone daily snapshots (per board)
+sector_data       — standalone daily snapshots
 ```
 
 ### Tables
@@ -122,6 +126,9 @@ portfolios (1) ────── (N) portfolio_nav_history
 - **portfolio_holdings**: portfolio_id, stock_id, shares, cost_price (nullable, immutable), cost_price_set_at
 - **portfolio_nav_history**: portfolio_id, nav_date, nav, daily_return, daily_return_rate, cum_return_rate, total_cost, total_market_value
 - **crawl_log**: crawl_type, ref_date, status, details (JSON)
+- **market_index**: code, name, trade_date, open/high/low/close, change, change_pct; UNIQUE(code, trade_date)
+- **market_breadth**: board, trade_date, total, up_count, down_count, flat_count; UNIQUE(board, trade_date)
+- **sector_data**: code, name, trade_date, change_pct, leading_stock, rank; UNIQUE(code, trade_date)
 
 ## API Design
 
@@ -130,9 +137,13 @@ portfolios (1) ────── (N) portfolio_nav_history
 | POST | /api/auth/register | No | Register |
 | POST | /api/auth/login | No | Login → JWT |
 | GET | /api/auth/me | Yes | Current user |
+| GET | /api/stocks/count | Yes | Total active stock count |
 | GET | /api/stocks | Yes | Search stocks |
 | GET | /api/stocks/{code} | Yes | Stock detail |
 | GET | /api/stocks/{code}/kline | Yes | K-line data |
+| GET | /api/market/indices | Yes | Major index quotes |
+| GET | /api/market/breadth | Yes | Market up/down counts |
+| GET | /api/market/sectors | Yes | Sector ranking |
 | GET | /api/watchlist | Yes | My watchlist |
 | POST | /api/watchlist/{code} | Yes | Add to watchlist |
 | DELETE | /api/watchlist/{code} | Yes | Remove from watchlist |
