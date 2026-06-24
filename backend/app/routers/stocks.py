@@ -36,6 +36,16 @@ def search_stocks(
     return StockSearchResponse(items=items)
 
 
+@router.get("/count")
+def count_stocks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get total count of active stocks."""
+    count = db.query(Stock).filter(Stock.is_active == 1).count()
+    return {"count": count}
+
+
 @router.get("/{code}", response_model=StockDetail)
 def get_stock(
     code: str,
