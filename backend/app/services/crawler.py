@@ -245,54 +245,36 @@ def crawl_kline_for_stock(
             return 0
 
         if overwrite:
-            # ── Overwrite mode: batch-fetch existing rows, upsert ──
-            dates_list = list(new_records.keys())
-            existing_map: dict[date, DailyKline] = {}
-            chunk_size = 500
-            for i in range(0, len(dates_list), chunk_size):
-                chunk = dates_list[i : i + chunk_size]
-                rows = (
-                    db.query(DailyKline)
-                    .filter(
-                        DailyKline.stock_id == stock.id,
-                        DailyKline.trade_date.in_(chunk),
-                    )
-                    .all()
-                )
-                for r in rows:
-                    existing_map[r.trade_date] = r
-
-            affected = 0
+            # ── Overwrite mode: delete all existing, then insert fresh ──
+            deleted = (
+                db.query(DailyKline)
+                .filter(DailyKline.stock_id == stock.id)
+                .delete()
+            )
+            inserted = 0
             for trade_date in sorted(new_records):
                 item = new_records[trade_date]
                 close = float(item["close"])
                 volume = int(item["volume"])
                 amount = float(item.get("amount", 0) or 0) or (close * volume)
+                db.add(DailyKline(
+                    stock_id=stock.id,
+                    trade_date=trade_date,
+                    open=float(item["open"]),
+                    high=float(item["high"]),
+                    low=float(item["low"]),
+                    close=close,
+                    volume=volume,
+                    amount=amount,
+                ))
+                inserted += 1
 
-                if trade_date in existing_map:
-                    row = existing_map[trade_date]
-                    row.open = float(item["open"])
-                    row.high = float(item["high"])
-                    row.low = float(item["low"])
-                    row.close = close
-                    row.volume = volume
-                    row.amount = amount
-                else:
-                    db.add(DailyKline(
-                        stock_id=stock.id,
-                        trade_date=trade_date,
-                        open=float(item["open"]),
-                        high=float(item["high"]),
-                        low=float(item["low"]),
-                        close=close,
-                        volume=volume,
-                        amount=amount,
-                    ))
-                affected += 1
-
-            if affected > 0:
-                db.commit()
-            return affected
+            db.commit()
+            logger.info(
+                f"Overwrite {stock.code}: deleted {deleted} old records, "
+                f"inserted {inserted} from API"
+            )
+            return inserted
 
         else:
             # ── Insert-only mode (default) ──
