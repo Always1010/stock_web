@@ -28,6 +28,11 @@ const routes = [
         component: () => import('../views/MarketOverview.vue'),
       },
       {
+        path: 'market/indices/:code',
+        name: 'IndexKline',
+        component: () => import('../views/IndexKline.vue'),
+      },
+      {
         path: 'stocks',
         name: 'StockSearch',
         component: () => import('../views/StockSearch.vue'),
