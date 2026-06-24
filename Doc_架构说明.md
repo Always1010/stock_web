@@ -100,7 +100,7 @@ stock_web/
 │   └── cli.py                   # Manual crawl CLI
 ├── nginx/
 │   └── stock-web.conf
-├── install.sh
+├── app.sh                     # 统一管理脚本
 └── README.md
 ```
 

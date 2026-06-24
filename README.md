@@ -25,9 +25,9 @@ A股股票模拟交易系统。支持自选股管理、K线图表、多组合管
 | **Alembic 迁移（推荐）** | `backend/alembic/versions/` | 版本化管理，`install.sh` 自动执行 |
 | **参考 SQL** | `backend/schema.sql` | 纯 SQL，可手动 `mysql < schema.sql` 导入 |
 
-**`install.sh` 使用的是 Alembic 方式**：在第 3 步安装完 Python 依赖后，自动执行 `alembic upgrade head`，将表结构创建到 MySQL。
+**`./app.sh install` 使用的是 Alembic 方式**：在第 3 步安装完 Python 依赖后，自动执行 `alembic upgrade head`，将表结构创建到 MySQL。
 
-### install.sh 什么时候创建数据库？
+### install 什么时候创建数据库？
 
 ```
 [2/5] Setting up MySQL database...
@@ -40,22 +40,22 @@ A股股票模拟交易系统。支持自选股管理、K线图表、多组合管
   → alembic upgrade head    ← 表结构在这里创建
 ```
 
-**注意**：`install.sh` 只负责 **安装依赖 + 创建空表**。它**不会启动后端进程**，也不会导入示例数据。
+**注意**：`install` 只负责 **安装依赖 + 创建空表**。它**不会启动后端进程**，也不会导入示例数据。
 
 ---
 
 ## 快速启动
 
-项目必须**手动启动**。`install.sh` 只执行一次（装环境），之后用 `start.sh`。
+所有操作通过 **`app.sh`** 统一管理，不同子命令区分功能。
 
 ### 第一次：安装环境
 
 ```bash
 cd /home/ubuntu/wrk/stock_web
-bash install.sh
+./app.sh install
 ```
 
-`install.sh` 做了这些事：
+`install` 做了这些事：
 1. 安装 MySQL 8.0、Node.js 22、Python venv
 2. 创建 `stock_web` 数据库和 `stock` 用户
 3. 安装 Python 依赖到 `backend/venv/`
@@ -66,13 +66,30 @@ bash install.sh
 
 ```bash
 # 启动（生产模式：gunicorn + nginx，访问 :80）
-bash start.sh
+./app.sh start
 
 # 或开发模式（uvicorn + vite，访问 :5173）
-bash start.sh dev
+./app.sh start dev
 
 # 停止
-bash stop.sh
+./app.sh stop
+
+# 查看状态
+./app.sh status
+```
+
+### 修改代码后如何更新？
+
+| 修改内容 | 开发模式 | 生产模式 |
+|---------|---------|---------|
+| 前端文件 | 无需操作（Vite HMR 自动热更新） | `./app.sh rebuild`（重新构建 dist/，Nginx 无需重启） |
+| 后端文件 | 无需操作（uvicorn --reload 自动重载） | `./app.sh reload`（优雅重启 gunicorn worker，零中断） |
+
+```bash
+# 生产模式修改后：
+./app.sh rebuild   # 改了前端代码 → 重构建静态文件
+./app.sh reload    # 改了后端代码 → 优雅重启后端
+./app.sh restart   # 全重启（等于 stop + start）
 ```
 
 ### 手动启动后端
@@ -96,7 +113,7 @@ npm run dev
 
 ## 导入示例数据
 
-`install.sh` 创建的是**空表**。如需演示数据：
+`./app.sh install` 创建的是**空表**。如需演示数据：
 
 ```bash
 cd backend
@@ -166,9 +183,7 @@ alembic downgrade -1
 
 ```
 stock_web/
-├── start.sh               # 启动脚本
-├── stop.sh                # 停止脚本
-├── install.sh             # 一键安装（仅首次执行）
+├── app.sh                  # 统一管理脚本（install/start/stop/rebuild/reload/status）
 ├── stock-web.service      # systemd 服务文件
 ├── Doc_架构说明.md          # 架构设计文档
 │

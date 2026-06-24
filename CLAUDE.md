@@ -39,32 +39,39 @@ A 股模拟交易 Web 应用。前后端分离：Vue 3 + FastAPI + MySQL 8.0。
 ## 常用命令
 
 ```bash
-# 后端
+# ── 服务管理（详见 ./app.sh） ──────────────────────────
+./app.sh start [dev|prod]   # 启动
+./app.sh stop               # 停止
+./app.sh restart            # 重启
+./app.sh rebuild            # 重新构建前端（生产模式修改前端后）
+./app.sh reload             # 优雅重启后端（生产模式修改后端后）
+./app.sh status             # 查看运行状态
+./app.sh logs [backend|frontend]  # 查看日志
+
+# ── 后端（手动开发） ──────────────────────────────────
 cd backend && source ../venv/bin/activate
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 # API 文档: http://localhost:8000/api/docs
 
-# 前端
+# ── 前端（手动开发） ──────────────────────────────────
 cd frontend && npm run dev     # 开发 :5173
 cd frontend && npm run build   # 构建
 
-# 数据库迁移
+# ── 数据库迁移 ───────────────────────────────────────
 cd backend && source ../venv/bin/activate
 alembic revision --autogenerate -m "描述"
 alembic upgrade head
 
-# CLI 工具
+# ── CLI 工具 ──────────────────────────────────────────
+cd backend && source ../venv/bin/activate
 python cli.py crawl-stock-list
 python cli.py crawl-kline --all
 python cli.py update-nav
-
-# 生产部署
-sudo systemctl reload nginx
-# 后端日志: /tmp/uvicorn.log
 ```
 
 ## 关键文件索引
 
+- `app.sh` — 统一管理脚本（install/start/stop/rebuild/reload/status/logs）
 - `Doc_架构说明.md` — 架构文档（技术栈、数据库、API 表）
 - `Doc_commit规范.md` — Commit 规范详细说明
 - `Doc_需求说明.md` — 需求文档
