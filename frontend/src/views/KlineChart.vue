@@ -130,6 +130,7 @@ async function fetchData() {
   const dates = res.data.map(d => d.date)
   const ohlc = res.data.map(d => [d.open, d.close, d.low, d.high])
   const volumes = res.data.map(d => d.volume)
+  const relChanges = calcRelChange(res.data)
 
   if (!chart) chart = echarts.init(chartRef.value)
   chart.setOption({
@@ -149,7 +150,7 @@ async function fetchData() {
     ],
     series: [
       { name: 'K线', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0, itemStyle: { color: '#e15241', color0: '#1aad56', borderColor: '#e15241', borderColor0: '#1aad56' } },
-      { name: '距今日', type: 'line', data: calcRelChange(res.data), xAxisIndex: 0, yAxisIndex: 2, smooth: true, symbol: 'none', lineStyle: { width: 1.5, color: '#6366f1', type: 'dashed' } },
+      { name: '距今日', type: 'line', data: relChanges, xAxisIndex: 0, yAxisIndex: 2, smooth: true, symbol: 'none', lineStyle: { width: 1.5, color: '#6366f1', type: 'dashed' } },
       { name: '量', type: 'bar', data: volumes.map((v, i) => ({ value: v, itemStyle: { color: i > 0 && ohlc[i] ? (ohlc[i][1] >= ohlc[i-1][1] ? '#e15241' : '#1aad56') : '#e15241', opacity: 0.5 } })), xAxisIndex: 1, yAxisIndex: 1 },
     ],
     tooltip: {
@@ -164,7 +165,6 @@ async function fetchData() {
         const d = res.data[idx]
         const rows = [
           `<div style="font-weight:600;margin-bottom:2px">${d.date}</div>`,
-          `${params[0].marker} K线`,
         ]
         const mk = (name, val, color) => `<span style="display:inline-block;width:36px;color:#9ca3af;font-size:11px">${name}</span> <b style="color:${color ?? '#1e2130'}">${val.toFixed(2)}</b>`
         rows.push(mk('开盘', d.open))
@@ -181,9 +181,9 @@ async function fetchData() {
             rows.push(mk('振幅', amp) + '<span style="font-size:11px;color:#1e2130">%</span>')
           }
         }
-        const rel = params[1]?.data
+        const rel = relChanges[idx]
         if (rel != null) {
-          rows.push(`距今日 <b style="color:${rel >= 0 ? '#e15241' : '#1aad56'}">${rel >= 0 ? '+' : ''}${rel}%</b>`)
+          rows.push(`<span style="display:inline-block;width:36px;color:#9ca3af;font-size:11px">距今日</span> <b style="color:${rel >= 0 ? '#e15241' : '#1aad56'}">${rel >= 0 ? '+' : ''}${rel}%</b>`)
         }
         const vs = d.volume >= 1e8 ? (d.volume/1e8).toFixed(2)+'亿' : (d.volume/1e4).toFixed(0)+'万手'
         rows.push(`<span style="display:inline-block;width:36px;color:#9ca3af;font-size:11px">成交量</span> <b>${vs}</b>`)
