@@ -3,6 +3,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sqla_func
 
 from app.database import get_db
 from app.models.stock import DailyKline, Stock
@@ -11,6 +12,30 @@ from app.schemas.stock import KlineItem, KlineResponse, StockDetail, StockSearch
 from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/stocks", tags=["Stocks"])
+
+
+def _get_price_info(stock_id: int, db: Session) -> tuple[float | None, float | None]:
+    """Get latest close and change% for a stock. Returns (close, change_pct)."""
+    latest = (
+        db.query(DailyKline)
+        .filter(DailyKline.stock_id == stock_id)
+        .order_by(DailyKline.trade_date.desc())
+        .first()
+    )
+    if not latest:
+        return None, None
+
+    prev = (
+        db.query(DailyKline)
+        .filter(DailyKline.stock_id == stock_id, DailyKline.trade_date < latest.trade_date)
+        .order_by(DailyKline.trade_date.desc())
+        .first()
+    )
+    if not prev or prev.close == 0:
+        return latest.close, None
+
+    change_pct = round((latest.close - prev.close) / prev.close * 100, 2)
+    return latest.close, change_pct
 
 
 @router.get("", response_model=StockSearchResponse)
@@ -29,10 +54,13 @@ def search_stocks(
         )
 
     stocks = query.limit(limit).all()
-    items = [
-        StockSummary(code=s.code, name=s.name, exchange=s.exchange)
-        for s in stocks
-    ]
+    items = []
+    for s in stocks:
+        close, change_pct = _get_price_info(s.id, db)
+        items.append(StockSummary(
+            code=s.code, name=s.name, exchange=s.exchange,
+            latest_close=close, change_pct=change_pct,
+        ))
     return StockSearchResponse(items=items)
 
 

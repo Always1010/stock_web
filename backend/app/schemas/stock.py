@@ -8,6 +8,8 @@ class StockSummary(BaseModel):
     code: str
     name: str
     exchange: str
+    latest_close: float | None = None
+    change_pct: float | None = None
 
     model_config = {"from_attributes": True}
 
