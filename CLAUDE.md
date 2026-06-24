@@ -68,6 +68,7 @@ sudo systemctl reload nginx
 - `Doc_架构说明.md` — 架构文档（技术栈、数据库、API 表）
 - `Doc_commit规范.md` — Commit 规范详细说明
 - `Doc_需求说明.md` — 需求文档
+- `Doc_爬虫策略.md` — 爬虫数据源、函数、调度、容错说明
 - `backend/app/models/` — 10 个 SQLAlchemy 模型
 - `backend/app/routers/` — 5 组 API 路由
 - `backend/app/services/` — 爬虫、净值计算、调度器
