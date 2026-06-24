@@ -3,7 +3,7 @@ from app.models.stock import Stock, DailyKline
 from app.models.watchlist import WatchlistItem
 from app.models.portfolio import Portfolio, PortfolioHolding, PortfolioNavHistory
 from app.models.crawl import CrawlLog
-from app.models.market import MarketIndex, MarketBreadth, SectorData
+from app.models.market import MarketIndex, MarketBreadth, SectorData, IndexKline
 
 __all__ = [
     "User",
@@ -17,4 +17,5 @@ __all__ = [
     "MarketIndex",
     "MarketBreadth",
     "SectorData",
+    "IndexKline",
 ]
