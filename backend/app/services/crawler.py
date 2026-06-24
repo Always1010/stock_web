@@ -71,7 +71,7 @@ def _determine_exchange(code: str) -> str | None:
         return "SH"
     elif code.startswith(("0", "3")):
         return "SZ"
-    elif code.startswith(("8", "4")):
+    elif code.startswith(("8", "4", "92")):
         return "BJ"
     return None
 
