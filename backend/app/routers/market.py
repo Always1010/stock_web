@@ -1,0 +1,137 @@
+"""Market overview routes: indices, breadth, sectors."""
+from datetime import date
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.market import MarketBreadth, MarketIndex, SectorData
+from app.models.user import User
+from app.schemas.market import (
+    BreadthItem,
+    BreadthResponse,
+    IndexItem,
+    IndicesResponse,
+    SectorItem,
+    SectorResponse,
+)
+from app.utils.security import get_current_user
+
+router = APIRouter(prefix="/market", tags=["Market"])
+
+BOARD_LABELS = {"SH": "沪市主板", "SZ": "深市主板", "BJ": "北交所"}
+
+
+@router.get("/indices", response_model=IndicesResponse)
+def get_indices(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get latest major A-share index quotes."""
+    # Get the most recent trade date
+    latest = (
+        db.query(MarketIndex)
+        .order_by(MarketIndex.trade_date.desc())
+        .first()
+    )
+    if not latest:
+        return IndicesResponse(data=[], trade_date="")
+
+    trade_date = latest.trade_date
+    indices = (
+        db.query(MarketIndex)
+        .filter(MarketIndex.trade_date == trade_date)
+        .order_by(MarketIndex.code)
+        .all()
+    )
+
+    data = [
+        IndexItem(
+            code=m.code,
+            name=m.name,
+            close=m.close,
+            change=m.change,
+            change_pct=m.change_pct,
+            open=m.open,
+            high=m.high,
+            low=m.low,
+            trade_date=m.trade_date.isoformat(),
+        )
+        for m in indices
+    ]
+    return IndicesResponse(data=data, trade_date=trade_date.isoformat())
+
+
+@router.get("/breadth", response_model=BreadthResponse)
+def get_breadth(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get market breadth (up/down/flat counts) for the latest trading day."""
+    latest = (
+        db.query(MarketBreadth)
+        .order_by(MarketBreadth.trade_date.desc())
+        .first()
+    )
+    if not latest:
+        return BreadthResponse(data=[], trade_date="")
+
+    trade_date = latest.trade_date
+    records = (
+        db.query(MarketBreadth)
+        .filter(MarketBreadth.trade_date == trade_date)
+        .order_by(MarketBreadth.board)
+        .all()
+    )
+
+    data = [
+        BreadthItem(
+            board=r.board,
+            board_label=BOARD_LABELS.get(r.board, r.board),
+            total=r.total,
+            up_count=r.up_count,
+            down_count=r.down_count,
+            flat_count=r.flat_count,
+            trade_date=r.trade_date.isoformat(),
+        )
+        for r in records
+    ]
+    return BreadthResponse(data=data, trade_date=trade_date.isoformat())
+
+
+@router.get("/sectors", response_model=SectorResponse)
+def get_sectors(
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get sector rankings for the latest trading day."""
+    latest = (
+        db.query(SectorData)
+        .order_by(SectorData.trade_date.desc())
+        .first()
+    )
+    if not latest:
+        return SectorResponse(data=[], trade_date="")
+
+    trade_date = latest.trade_date
+    sectors = (
+        db.query(SectorData)
+        .filter(SectorData.trade_date == trade_date)
+        .order_by(SectorData.rank.asc())
+        .limit(limit)
+        .all()
+    )
+
+    data = [
+        SectorItem(
+            code=s.code,
+            name=s.name,
+            change_pct=s.change_pct,
+            leading_stock=s.leading_stock,
+            leading_stock_change=s.leading_stock_change,
+            rank=s.rank,
+        )
+        for s in sectors
+    ]
+    return SectorResponse(data=data, trade_date=trade_date.isoformat())

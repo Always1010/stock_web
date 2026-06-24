@@ -51,9 +51,10 @@ def health_check():
 
 
 # Register routers
-from app.routers import auth, stocks, watchlist, portfolio  # noqa: E402
+from app.routers import auth, stocks, watchlist, portfolio, market  # noqa: E402
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(stocks.router, prefix="/api")
 app.include_router(watchlist.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
+app.include_router(market.router, prefix="/api")
