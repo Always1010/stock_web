@@ -94,3 +94,21 @@ class IndexKline(Base):
 
     def __repr__(self) -> str:
         return f"<IndexKline(code={self.code}, date={self.trade_date})>"
+
+
+class MarketTurnover(Base):
+    """Daily total market turnover (all A-shares combined)."""
+    __tablename__ = "market_turnover"
+    __table_args__ = (
+        UniqueConstraint("trade_date", name="uk_turnover_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    total_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    total_volume: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    stock_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<MarketTurnover(date={self.trade_date}, amount={self.total_amount})>"

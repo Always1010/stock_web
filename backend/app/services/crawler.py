@@ -599,3 +599,62 @@ def crawl_index_kline_all(db: Session | None = None) -> dict:
     finally:
         if close_db and db:
             db.close()
+
+
+# ═══════════════════════════════════════════════════════════
+# Market Turnover
+# ═══════════════════════════════════════════════════════════
+
+def crawl_market_turnover(db: Session | None = None) -> dict:
+    """Calculate total market turnover from daily K-line data."""
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        from app.models.market import MarketTurnover
+        from sqlalchemy import func as sqla_func
+
+        # Get latest date with K-line data
+        latest_date = db.query(sqla_func.max(DailyKline.trade_date)).scalar()
+        if not latest_date:
+            return {"error": "No K-line data available"}
+
+        # Sum amount and volume for the latest date
+        row = (
+            db.query(
+                sqla_func.sum(DailyKline.amount).label("total_amount"),
+                sqla_func.sum(DailyKline.volume).label("total_volume"),
+                sqla_func.count(DailyKline.id).label("stock_count"),
+            )
+            .filter(DailyKline.trade_date == latest_date)
+            .first()
+        )
+
+        total_amount = float(row.total_amount or 0)
+        total_volume = int(row.total_volume or 0)
+        stock_count = int(row.stock_count or 0)
+
+        existing = (
+            db.query(MarketTurnover)
+            .filter(MarketTurnover.trade_date == latest_date)
+            .first()
+        )
+        if existing:
+            existing.total_amount = total_amount
+            existing.total_volume = total_volume
+            existing.stock_count = stock_count
+        else:
+            db.add(MarketTurnover(
+                trade_date=latest_date,
+                total_amount=total_amount,
+                total_volume=total_volume,
+                stock_count=stock_count,
+            ))
+
+        db.commit()
+        logger.info(f"Market turnover: date={latest_date}, amount={total_amount:.0f}")
+        return {"date": str(latest_date), "amount": total_amount, "volume": total_volume, "stocks": stock_count}
+    finally:
+        if close_db and db:
+            db.close()

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.market import IndexKline, MarketBreadth, MarketIndex, SectorData
+from app.models.market import IndexKline, MarketBreadth, MarketIndex, MarketTurnover, SectorData
 from app.models.user import User
 from app.schemas.market import (
     BreadthItem,
@@ -195,3 +195,42 @@ def get_index_kline(
         for r in records
     ]
     return IndexKlineResponse(code=code, name=name, data=data)
+
+
+@router.get("/turnover")
+def get_turnover(
+    days: int = Query(60, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get daily total market turnover history."""
+    from app.schemas.market import TurnoverItem, TurnoverResponse
+
+    records = (
+        db.query(MarketTurnover)
+        .order_by(MarketTurnover.trade_date.desc())
+        .limit(days)
+        .all()
+    )
+
+    # On-demand crawl if no data
+    if not records:
+        from app.services.crawler import crawl_market_turnover
+        crawl_market_turnover(db)
+        records = (
+            db.query(MarketTurnover)
+            .order_by(MarketTurnover.trade_date.desc())
+            .limit(days)
+            .all()
+        )
+
+    data = [
+        TurnoverItem(
+            trade_date=r.trade_date.isoformat(),
+            total_amount=r.total_amount,
+            total_volume=r.total_volume,
+            stock_count=r.stock_count,
+        )
+        for r in reversed(records)  # chronological order
+    ]
+    return TurnoverResponse(data=data)
