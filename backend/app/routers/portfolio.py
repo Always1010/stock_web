@@ -19,20 +19,42 @@ from app.schemas.portfolio import (
     NavHistoryResponse,
     PortfolioCreate,
     PortfolioDetail,
+    PortfolioNavRecalcResponse,
+    PortfolioRefreshResponse,
     PortfolioSummary,
     PortfolioUpdate,
     SetCostPriceRequest,
+    SetReturnStartDateRequest,
     UpdateHoldingRequest,
 )
 from app.services.portfolio_service import (
     calculate_contributions,
+    fill_missing_nav,
     generate_portfolio_code,
     get_latest_close,
+    recalculate_portfolio_nav,
+    refresh_portfolio_kline,
     set_holding_cost_price,
 )
 from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/portfolios", tags=["Portfolios"])
+
+
+def _get_user_portfolio(
+    code: str, db: Session, current_user: User
+) -> Portfolio:
+    """Look up a portfolio by code, ensuring it belongs to the current user."""
+    portfolio = (
+        db.query(Portfolio)
+        .filter(Portfolio.code == code, Portfolio.user_id == current_user.id)
+        .first()
+    )
+    if not portfolio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio not found"
+        )
+    return portfolio
 
 
 # ── Portfolio CRUD ──────────────────────────────────────────────
@@ -63,6 +85,7 @@ def list_portfolios(
                 code=p.code,
                 name=p.name,
                 created_at=p.created_at,
+                return_start_date=p.return_start_date,
                 latest_nav=latest_nav.nav if latest_nav else None,
                 latest_return_rate=latest_nav.cum_return_rate if latest_nav else None,
             )
@@ -92,6 +115,7 @@ def create_portfolio(
         name=portfolio.name,
         created_at=portfolio.created_at,
         updated_at=portfolio.updated_at,
+        return_start_date=portfolio.return_start_date,
         holdings=[],
         latest_nav=None,
         latest_return_rate=None,
@@ -139,6 +163,7 @@ def get_portfolio(
         name=portfolio.name,
         created_at=portfolio.created_at,
         updated_at=portfolio.updated_at,
+        return_start_date=portfolio.return_start_date,
         holdings=holdings,
         latest_nav=latest_nav.nav if latest_nav else None,
         latest_return_rate=latest_nav.cum_return_rate if latest_nav else None,
@@ -474,3 +499,82 @@ def get_contributions(
         end_date=end or "",
         data=items,
     )
+
+
+# ── Return Start Date ────────────────────────────────────────────
+
+@router.put("/{code}/return-start-date", response_model=PortfolioDetail)
+def set_return_start_date(
+    code: str,
+    req: SetReturnStartDateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Set the return calculation start date for a portfolio."""
+    portfolio = _get_user_portfolio(code, db, current_user)
+    portfolio.return_start_date = req.return_start_date
+    db.commit()
+    db.refresh(portfolio)
+    return get_portfolio(code, db, current_user)
+
+
+# ── Portfolio Data Refresh ───────────────────────────────────────
+
+@router.post("/{code}/refresh-data", response_model=PortfolioRefreshResponse)
+def refresh_portfolio_data_full(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Full data refresh: re-crawl all holdings' kline data (overwrite=True)."""
+    portfolio = _get_user_portfolio(code, db, current_user)
+    result = refresh_portfolio_kline(portfolio, db, overwrite=True)
+    result["message"] = (
+        f"全量更新完成: 处理 {result['processed']}/{result['total_stocks']} 只股票, "
+        f"更新 {result['total_affected']} 条记录"
+    )
+    return result
+
+
+@router.post("/{code}/refresh-data/incr", response_model=PortfolioRefreshResponse)
+def refresh_portfolio_data_incr(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Incremental data refresh: crawl only missing kline data (overwrite=False)."""
+    portfolio = _get_user_portfolio(code, db, current_user)
+    result = refresh_portfolio_kline(portfolio, db, overwrite=False)
+    result["message"] = (
+        f"增量更新完成: 处理 {result['processed']}/{result['total_stocks']} 只股票, "
+        f"新增 {result['total_affected']} 条记录"
+    )
+    return result
+
+
+# ── Portfolio NAV Recalculation ──────────────────────────────────
+
+@router.post("/{code}/recalc-nav", response_model=PortfolioNavRecalcResponse)
+def recalc_portfolio_nav_full(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Full NAV recalculation: delete NAV from return_start_date and recompute."""
+    portfolio = _get_user_portfolio(code, db, current_user)
+    result = recalculate_portfolio_nav(portfolio, db)
+    result["message"] = f"全量收益计算完成: 生成 {result['records_created']} 条收益记录"
+    return result
+
+
+@router.post("/{code}/recalc-nav/incr", response_model=PortfolioNavRecalcResponse)
+def recalc_portfolio_nav_incr(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Incremental NAV fill: find latest NAV date and fill missing days to today."""
+    portfolio = _get_user_portfolio(code, db, current_user)
+    result = fill_missing_nav(portfolio, db)
+    result["message"] = f"增量收益计算完成: 生成 {result['records_created']} 条收益记录"
+    return result
