@@ -157,9 +157,10 @@ sector_data       — standalone daily snapshots
 | DELETE | /api/portfolios/{code}/holdings/{id} | Yes | Remove holding |
 | POST | /api/portfolios/{code}/holdings/{id}/set-cost | Yes | Set cost price |
 | GET | /api/portfolios/{code}/nav | Yes | NAV history |
-| GET | /api/portfolios/{code}/daily-returns | Yes | Daily returns |
-| GET | /api/portfolios/{code}/monthly-returns | Yes | Monthly returns |
-| GET | /api/portfolios/{code}/contributions | Yes | Contribution |
+| GET | /api/portfolios/{code}/daily-returns | Yes | Daily returns（前端可替代） |
+| GET | /api/portfolios/{code}/monthly-returns | Yes | Monthly returns（前端可替代） |
+| GET | /api/portfolios/{code}/contributions | Yes | Contribution（前端可替代） |
+| GET | /api/portfolios/{code}/holdings-kline | Yes | 原始持仓K线（供前端计算） |
 
 ## Key Business Rules
 
@@ -198,15 +199,20 @@ GET /portfolios/{code}
   │  holdings[].cost_price
   │  holdings[].shares    ──→  calcReturnAmount()     ──→  持仓累计收益
   │                       ──→  calcReturnRate()       ──→  持仓收益率
-  ├─ holdings[].current_price
-  │  holdings[].prev_close──→  calcDailyReturnRate()  ──→  持仓当日收益率
-  │
-GET /portfolios/{code}/nav
-  └─ data[].nav + date   ──→  calcDailyReturns()     ──→  日历日收益
-                          ──→  calcMonthlyReturns()   ──→  日历月收益
+  └─ holdings[].current_price
+     holdings[].prev_close──→  calcDailyReturnRate()  ──→  持仓当日收益率
 
-GET /portfolios/{code}/contributions
-  └─ 跨表查个股K线，前端不便，保留后端计算
+GET /portfolios/{code}/holdings-kline  ★ 核心原始数据端点
+  └─ 每只持仓的 [{date, close}] 序列 + shares + cost_price
+       │
+       ├── calcNavSeries()       → [{date, nav, total_cost}]  NAV 序列
+       │    ├── calcDailyReturns()   → 日历日收益
+       │    └── calcMonthlyReturns() → 日历月收益
+       │
+       └── calcContributions()   → 贡献分析（日/月/年）
+
+由此一个端点替代了原先 /nav + /daily-returns + /monthly-returns + /contributions 四个端点。
+前端拿到原始 K 线后，所有衍生计算都在客户端完成。
 ```
 
 ### 前端计算工具库
@@ -219,19 +225,32 @@ GET /portfolios/{code}/contributions
 | `calcReturnRate(cur, cost)` | 现价、成本价 | 持仓收益率 | 后端 `return_rate` |
 | `calcDailyReturnRate(cur, prev)` | 现价、前日收盘 | 个股当日涨跌幅 | 后端 `daily_return_rate` |
 | `calcCumReturn(nav, cost)` | 总市值、总成本 | 组合累计收益 | 后端 `latest_cumulative_return` |
+| `calcNavSeries(holdings)` | 持仓K线 `[{kline:[{date,close}], shares, cost_price}]` | `[{date, nav, total_cost}]` | `/nav` 端点 |
 | `calcDailyReturns(navSeries)` | NAV 序列 `[{date,nav}]` | `Map<日期, {return_amount, return_rate}>` | `/daily-returns` 端点 |
 | `calcMonthlyReturns(navSeries, year)` | NAV 序列 + 年份 | `[{month, return_amount, return_rate}]` | `/monthly-returns` 端点 |
+| `calcContributions(holdings, start, end)` | 持仓K线 + 起止日期 | 个股期间收益列表 | `/contributions` 端点 |
 | `fmtMoney(v)` | 数值 | 格式化金额字符串 | — |
 | `fmtRate(v)` | 数值 | 格式化百分比字符串 | — |
 | `moneyClass(v)` / `rateClass(v)` | 数值 | CSS 类名 (up/down/zero) | — |
 
-### 后端为此新增的原始数据字段
+### 后端为此新增的原始数据
 
-| Schema | 字段 | 用途 |
-|--------|------|------|
+| 端点/Schema | 字段 | 用途 |
+|-------------|------|------|
+| `GET /holdings-kline` | 每只持仓的 `[{date, close}]` + `shares` + `cost_price` | 前端算 NAV、日历、贡献分析的核心数据源 |
 | `HoldingResponse` | `prev_close` | 前一交易日收盘价，供前端算当日收益率 |
 | `PortfolioDetail` | `latest_total_cost` | 最新总成本，供前端算累计收益 |
 | `PortfolioSummary` | `latest_total_cost` | 同上（列表页） |
+
+### 后端可精简项
+
+以下端点 PortfolioDetail 页面已不再使用，前端通过 `holdings-kline` + `portfolioCalc.js` 自行计算。
+接口保留供其他潜在调用方，代码中已标注「便捷计算（前端也可完成）」：
+
+- `GET /portfolios/{code}/nav` → 前端 `calcNavSeries` 替代
+- `GET /portfolios/{code}/daily-returns` → 前端 `calcDailyReturns` 替代
+- `GET /portfolios/{code}/monthly-returns` → 前端 `calcMonthlyReturns` 替代
+- `GET /portfolios/{code}/contributions` → 前端 `calcContributions` 替代
 
 ### 后端标注
 
