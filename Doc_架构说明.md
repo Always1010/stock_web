@@ -82,7 +82,7 @@ stock_web/
 │   │   ├── api/index.js         # Axios + interceptors
 │   │   ├── views/               # Route-level pages
 │   │   ├── components/          # Reusable components
-│   │   └── utils/               # Formatters
+│   │   └── utils/               # Formatters, portfolioCalc.js
 │   └── dist/                    # Production build
 ├── backend/                     # FastAPI
 │   ├── app/
@@ -158,6 +158,7 @@ sector_data       — standalone daily snapshots
 | POST | /api/portfolios/{code}/holdings/{id}/set-cost | Yes | Set cost price |
 | GET | /api/portfolios/{code}/nav | Yes | NAV history |
 | GET | /api/portfolios/{code}/daily-returns | Yes | Daily returns |
+| GET | /api/portfolios/{code}/monthly-returns | Yes | Monthly returns |
 | GET | /api/portfolios/{code}/contributions | Yes | Contribution |
 
 ## Key Business Rules
@@ -179,3 +180,60 @@ sector_data       — standalone daily snapshots
 ### Portfolio Code Generation
 - Pattern: `PF{YYYYMMDD}{NNN}` (e.g., PF20260624001)
 - Sequence resets daily, pads to 3 digits
+
+## Frontend Computation (前端计算方案)
+
+为减轻后端计算压力，组合详情页（PortfolioDetail）的衍生指标计算已迁移到前端。
+后端负责提供原始数据，前端利用 `frontend/src/utils/portfolioCalc.js` 工具库自行计算。
+
+### 数据流
+
+```
+后端接口                         原始数据                       前端计算
+──────────────────────────────────────────────────────────────────────
+GET /portfolios/{code}
+  ├─ latest_nav          ──→  calcCumReturn()         ──→  Hero 累计收益
+  ├─ latest_total_cost   ──→  calcReturnRate()        ──→  Hero 累计收益率
+  ├─ holdings[].current_price
+  │  holdings[].cost_price
+  │  holdings[].shares    ──→  calcReturnAmount()     ──→  持仓累计收益
+  │                       ──→  calcReturnRate()       ──→  持仓收益率
+  ├─ holdings[].current_price
+  │  holdings[].prev_close──→  calcDailyReturnRate()  ──→  持仓当日收益率
+  │
+GET /portfolios/{code}/nav
+  └─ data[].nav + date   ──→  calcDailyReturns()     ──→  日历日收益
+                          ──→  calcMonthlyReturns()   ──→  日历月收益
+
+GET /portfolios/{code}/contributions
+  └─ 跨表查个股K线，前端不便，保留后端计算
+```
+
+### 前端计算工具库
+
+**文件**: `frontend/src/utils/portfolioCalc.js`
+
+| 函数 | 输入 | 输出 | 替代后端 |
+|------|------|------|---------|
+| `calcReturnAmount(cur, cost, shares)` | 现价、成本价、股数 | 持仓收益金额 | 后端 `return_amount` |
+| `calcReturnRate(cur, cost)` | 现价、成本价 | 持仓收益率 | 后端 `return_rate` |
+| `calcDailyReturnRate(cur, prev)` | 现价、前日收盘 | 个股当日涨跌幅 | 后端 `daily_return_rate` |
+| `calcCumReturn(nav, cost)` | 总市值、总成本 | 组合累计收益 | 后端 `latest_cumulative_return` |
+| `calcDailyReturns(navSeries)` | NAV 序列 `[{date,nav}]` | `Map<日期, {return_amount, return_rate}>` | `/daily-returns` 端点 |
+| `calcMonthlyReturns(navSeries, year)` | NAV 序列 + 年份 | `[{month, return_amount, return_rate}]` | `/monthly-returns` 端点 |
+| `fmtMoney(v)` | 数值 | 格式化金额字符串 | — |
+| `fmtRate(v)` | 数值 | 格式化百分比字符串 | — |
+| `moneyClass(v)` / `rateClass(v)` | 数值 | CSS 类名 (up/down/zero) | — |
+
+### 后端为此新增的原始数据字段
+
+| Schema | 字段 | 用途 |
+|--------|------|------|
+| `HoldingResponse` | `prev_close` | 前一交易日收盘价，供前端算当日收益率 |
+| `PortfolioDetail` | `latest_total_cost` | 最新总成本，供前端算累计收益 |
+| `PortfolioSummary` | `latest_total_cost` | 同上（列表页） |
+
+### 后端标注
+
+后端中标记为「便捷计算（前端也可完成）」的计算，接口保持不变但注释说明了前端替代方式，
+后续如需进一步精简后端可直接移除这些计算而前端不受影响。
