@@ -32,6 +32,17 @@ A 股模拟交易 Web 应用。前后端分离：Vue 3 + FastAPI + MySQL 8.0。
 - 一个 commit 只做一件事
 - 不需要正文，除非有特别需要说明的背景
 
+### 禁止随意操作分支
+
+**绝对禁止**以下操作，除非用户明确要求：
+- `git branch -D` / `git branch -d`（删除分支）
+- `git checkout`（切换分支）
+- `git switch`（切换分支）
+- `git merge`（合并分支）
+- 任何修改当前分支的行为
+
+用户可能在不同分支上做实验性开发，随意切换或删除分支会导致工作丢失。
+
 ### 会话结束前记录日志
 
 每次会话结束时，用 `python3 ~/.claude/scripts/log.py` 记录到项目根目录的 `session-log.md`。
