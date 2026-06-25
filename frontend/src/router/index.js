@@ -30,7 +30,8 @@ const routes = [
       {
         path: 'market/indices/:code',
         name: 'IndexKline',
-        component: () => import('../views/IndexKline.vue'),
+        component: () => import('../views/KlineChart.vue'),
+        meta: { type: 'index' },
       },
       {
         path: 'stocks',

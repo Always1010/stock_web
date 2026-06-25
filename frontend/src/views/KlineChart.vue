@@ -1,5 +1,11 @@
 <template>
   <div>
+    <!-- Back link (index only) -->
+    <div v-if="isIndex" class="back-link" @click="$router.push('/market')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      返回行情
+    </div>
+
     <!-- Price Hero -->
     <div class="kline-hero" v-if="latestData">
       <div class="hero-left">
@@ -44,7 +50,7 @@
         <span class="detail-value" v-if="amplitude != null">{{ amplitude.toFixed(2) }}%</span>
         <span class="detail-value" v-else>--</span>
       </div>
-      <button
+      <button v-if="!isIndex"
         class="hero-star"
         :class="{ watched: isWatched }"
         @click="toggleWatchlist"
@@ -53,7 +59,7 @@
         <svg width="14" height="14" viewBox="0 0 24 24" :fill="isWatched ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
         {{ isWatched ? '已自选' : '加自选' }}
       </button>
-      <button class="hero-refresh" :disabled="refreshing" @click="refreshData">
+      <button v-if="!isIndex" class="hero-refresh" :disabled="refreshing" @click="refreshData">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: refreshing }"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         {{ refreshing ? '更新中...' : '更新数据' }}
       </button>
@@ -73,7 +79,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
-import { stockApi, watchlistApi } from '../api'
+import api, { stockApi, watchlistApi } from '../api'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
@@ -112,6 +118,8 @@ const amplitude = computed(() => {
   return +(((latestData.value.high - latestData.value.low) / prevClose) * 100).toFixed(2)
 })
 
+const isIndex = computed(() => route.meta.type === 'index')
+
 function fmtAmount(v) {
   if (!v || v === 0) return '--'
   if (v >= 1e8) return (v / 1e8).toFixed(2) + '亿'
@@ -128,7 +136,9 @@ function getDateRange() {
 
 async function fetchData() {
   const { start, end } = getDateRange()
-  const { data: res } = await stockApi.kline(code.value, start, end)
+  const { data: res } = isIndex.value
+    ? await api.get(`/market/indices/${code.value}/kline`, { params: { start, end } })
+    : await stockApi.kline(code.value, start, end)
   stockName.value = res.name
   klineData.value = res.data
   if (!res.data.length) return
@@ -231,10 +241,12 @@ watch(() => route.params.code, (newCode) => {
 
 onMounted(async () => {
   fetchData()
-  try {
-    const { data } = await watchlistApi.list()
-    watchlistCodes.value = new Set(data.items.map(w => w.code))
-  } catch { /* ignore */ }
+  if (!isIndex.value) {
+    try {
+      const { data } = await watchlistApi.list()
+      watchlistCodes.value = new Set(data.items.map(w => w.code))
+    } catch { /* ignore */ }
+  }
 })
 const hr = () => chart?.resize()
 window.addEventListener('resize', hr)
@@ -242,6 +254,10 @@ onUnmounted(() => { window.removeEventListener('resize', hr); chart?.dispose() }
 </script>
 
 <style scoped>
+/* ── Back link ── */
+.back-link { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; margin-bottom: var(--space-3); }
+.back-link:hover { color: var(--color-primary); }
+
 /* ── Hero ── */
 .kline-hero {
   display: flex; justify-content: space-between; align-items: center;
