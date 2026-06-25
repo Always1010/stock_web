@@ -441,18 +441,32 @@ def get_nav_history(
 
     history = query.order_by(PortfolioNavHistory.nav_date.asc()).all()
 
-    data = [
-        NavHistoryItem(
-            date=h.nav_date.isoformat(),
-            nav=h.nav,
-            daily_return=h.daily_return,
-            daily_return_rate=h.daily_return_rate,
-            cum_return_rate=h.cum_return_rate,
-            total_cost=h.total_cost,
-            total_market_value=h.total_market_value,
+    # 派生字段实时计算（不再依赖持久化字段）
+    data = []
+    prev_nav = None
+    for h in history:
+        daily_return = None
+        daily_return_rate = None
+        if prev_nav is not None and prev_nav > 0:
+            daily_return = h.nav - prev_nav
+            daily_return_rate = daily_return / prev_nav
+        prev_nav = h.nav
+
+        cum_return_rate = None
+        if h.total_cost and h.total_cost > 0:
+            cum_return_rate = (h.total_market_value / h.total_cost) - 1
+
+        data.append(
+            NavHistoryItem(
+                date=h.nav_date.isoformat(),
+                nav=h.nav,
+                daily_return=daily_return,
+                daily_return_rate=daily_return_rate,
+                cum_return_rate=cum_return_rate,
+                total_cost=h.total_cost,
+                total_market_value=h.total_market_value,
+            )
         )
-        for h in history
-    ]
 
     return NavHistoryResponse(
         portfolio_code=portfolio.code,
