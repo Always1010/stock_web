@@ -110,7 +110,7 @@
           <span class="col-rr">累计收益率</span>
           <span class="col-a"></span>
         </div>
-        <div v-for="h in portfolio.holdings" :key="h.id" class="ht-row">
+        <div v-for="h in portfolio.holdings" :key="h.id" class="ht-row" @click="$router.push(`/stocks/${h.stock_code}/kline`)">
           <span class="col-n">{{ h.stock_name }}</span>
           <span class="col-c"><span class="code-text">{{ h.stock_code }}</span></span>
           <span class="col-s">{{ h.shares }} 股</span>
@@ -134,7 +134,7 @@
             <span v-if="h.return_rate != null" :class="rateClass(h.return_rate)">{{ fmtRate(h.return_rate) }}</span>
             <span v-else class="unset">--</span>
           </span>
-          <span class="col-a">
+          <span class="col-a" @click.stop>
             <button v-if="!h.is_cost_locked" class="btn-mini" @click="openSetCost(h)">设定成本</button>
             <span v-else class="locked-tag">已锁定</span>
             <button class="btn-mini danger" @click="handleRemove(h)">删除</button>
@@ -799,12 +799,13 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); oc?
 }
 .ht-header, .ht-row {
   display: grid;
-  grid-template-columns: 1fr 80px 70px 90px 85px 85px 100px 90px 160px;
+  grid-template-columns: 1fr 80px 70px 90px 85px 85px 100px 90px 120px;
   align-items: center; padding: var(--space-3) var(--space-5); gap: var(--space-3);
 }
 .ht-header span, .ht-row span { white-space: nowrap; }
 .ht-header { font-size: var(--text-xs); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; background: var(--color-bg); border-bottom: 1px solid var(--color-border); }
-.ht-row { border-bottom: 1px solid var(--color-divider); font-size: var(--text-base); }
+.ht-row { border-bottom: 1px solid var(--color-divider); font-size: var(--text-base); cursor: pointer; transition: background var(--transition-fast); }
+.ht-row:hover { background: var(--color-bg); }
 .ht-row:last-child { border-bottom: none; }
 .ht-empty { text-align: center; padding: var(--space-8); color: var(--color-text-muted); font-size: var(--text-sm); }
 

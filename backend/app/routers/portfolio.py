@@ -498,14 +498,35 @@ def get_daily_returns(
         .all()
     )
 
-    data = [
-        DailyReturnItem(
-            date=h.nav_date.isoformat(),
-            return_amount=h.daily_return,
-            return_rate=h.daily_return_rate,
+    # Fetch last NAV before range to compute first day's daily return
+    prev_nav = None
+    last_before = (
+        db.query(PortfolioNavHistory)
+        .filter(
+            PortfolioNavHistory.portfolio_id == portfolio.id,
+            PortfolioNavHistory.nav_date < start_date,
         )
-        for h in history
-    ]
+        .order_by(PortfolioNavHistory.nav_date.desc())
+        .first()
+    )
+    if last_before:
+        prev_nav = last_before.nav
+
+    data = []
+    for h in history:
+        return_amount = None
+        return_rate = None
+        if prev_nav is not None and prev_nav > 0:
+            return_amount = h.nav - prev_nav
+            return_rate = return_amount / prev_nav
+        prev_nav = h.nav
+        data.append(
+            DailyReturnItem(
+                date=h.nav_date.isoformat(),
+                return_amount=return_amount,
+                return_rate=return_rate,
+            )
+        )
 
     return DailyReturnsResponse(
         portfolio_code=portfolio.code,
