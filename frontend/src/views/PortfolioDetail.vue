@@ -17,14 +17,14 @@
         </div>
         <div>
           <div class="stat-label">累计收益</div>
-          <div :class="['hero-value', (portfolio.latest_cumulative_return ?? 0) >= 0 ? 'up' : 'down']">
-            {{ portfolio.latest_cumulative_return != null ? (portfolio.latest_cumulative_return >= 0 ? '¥' : '-¥') + Math.abs(portfolio.latest_cumulative_return).toFixed(2) : '--' }}
+          <div :class="['hero-value', (heroCumReturn ?? 0) >= 0 ? 'up' : 'down']">
+            {{ heroCumReturn != null ? fmtMoney(heroCumReturn) : '--' }}
           </div>
         </div>
         <div>
           <div class="stat-label">累计收益率</div>
-          <div :class="['hero-value', (portfolio.latest_return_rate ?? 0) >= 0 ? 'up' : 'down']">
-            {{ portfolio.latest_return_rate != null ? ((portfolio.latest_return_rate * 100).toFixed(2) + '%') : '--' }}
+          <div :class="['hero-value', (heroCumRate ?? 0) >= 0 ? 'up' : 'down']">
+            {{ heroCumRate != null ? fmtRate(heroCumRate) : '--' }}
           </div>
         </div>
       </div>
@@ -110,7 +110,7 @@
           <span class="col-rr">累计收益率</span>
           <span class="col-a"></span>
         </div>
-        <div v-for="h in portfolio.holdings" :key="h.id" class="ht-row" @click="$router.push(`/stocks/${h.stock_code}/kline`)">
+        <div v-for="h in enrichedHoldings" :key="h.id" class="ht-row" @click="$router.push(`/stocks/${h.stock_code}/kline`)">
           <span class="col-n">{{ h.stock_name }}</span>
           <span class="col-c"><span class="code-text">{{ h.stock_code }}</span></span>
           <span class="col-s">{{ h.shares }} 股</span>
@@ -123,15 +123,15 @@
             <span v-else class="unset">--</span>
           </span>
           <span class="col-dr">
-            <span v-if="h.daily_return_rate != null" :class="rateClass(h.daily_return_rate)">{{ fmtRate(h.daily_return_rate) }}</span>
+            <span v-if="h._dailyReturnRate != null" :class="rateClass(h._dailyReturnRate)">{{ fmtRate(h._dailyReturnRate) }}</span>
             <span v-else class="unset">--</span>
           </span>
           <span class="col-ra">
-            <span v-if="h.return_amount != null" :class="moneyClass(h.return_amount)">{{ fmtMoney(h.return_amount) }}</span>
+            <span v-if="h._returnAmount != null" :class="moneyClass(h._returnAmount)">{{ fmtMoney(h._returnAmount) }}</span>
             <span v-else class="unset">--</span>
           </span>
           <span class="col-rr">
-            <span v-if="h.return_rate != null" :class="rateClass(h.return_rate)">{{ fmtRate(h.return_rate) }}</span>
+            <span v-if="h._returnRate != null" :class="rateClass(h._returnRate)">{{ fmtRate(h._returnRate) }}</span>
             <span v-else class="unset">--</span>
           </span>
           <span class="col-a" @click.stop>
@@ -327,6 +327,11 @@ import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { portfolioApi, stockApi } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  calcReturnAmount, calcReturnRate, calcDailyReturnRate,
+  calcCumReturn, calcDailyReturns, calcMonthlyReturns,
+  fmtMoney, fmtRate, moneyClass, rateClass,
+} from '../utils/portfolioCalc'
 
 const route = useRoute()
 const code = route.params.code
@@ -526,12 +531,27 @@ function handleSearchEnter() {
   }
 }
 
-// ── Holdings ──
-function moneyClass(v) { return v > 0 ? 'up' : v < 0 ? 'down' : 'zero' }
-function fmtMoney(v) { return v >= 0 ? '¥' + v.toFixed(2) : '-¥' + Math.abs(v).toFixed(2) }
-function rateClass(v) { return v > 0 ? 'up' : v < 0 ? 'down' : 'zero' }
-function fmtRate(v) { return (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%' }
+// ── 前端计算：用原始数据自行算出持仓衍生指标，与后端返回值等效 ──
+const enrichedHoldings = computed(() => {
+  return portfolio.value.holdings.map(h => ({
+    ...h,
+    _returnAmount: calcReturnAmount(h.current_price, h.cost_price, h.shares),
+    _returnRate: calcReturnRate(h.current_price, h.cost_price),
+    _dailyReturnRate: calcDailyReturnRate(h.current_price, h.prev_close),
+  }))
+})
 
+// 前端计算 Hero 累计收益/收益率（无需依赖后端便捷计算字段）
+const heroCumReturn = computed(() => {
+  const p = portfolio.value
+  return calcCumReturn(p.latest_nav, p.latest_total_cost)
+})
+const heroCumRate = computed(() => {
+  const p = portfolio.value
+  return calcReturnRate(p.latest_nav, p.latest_total_cost)
+})
+
+// ── Holdings ──
 async function handleAdd() {
   try {
     await portfolioApi.addHolding(code, {
@@ -617,7 +637,6 @@ function selectMonth(m) {
   const lastDay = new Date(calYear.value, m, 0).getDate()
   const endStr = `${calYear.value}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
   selectedPeriod.value = { type: 'month', start: startStr, end: endStr }
-  fetchDailyData()
   fetchContribForPeriod(startStr, endStr)
 }
 
@@ -664,22 +683,28 @@ function dayCellBgClass(dateStr) {
   return d.return_amount > 0 ? 'bg-up' : d.return_amount < 0 ? 'bg-down' : ''
 }
 
-async function fetchMonthlyData() {
+/**
+ * 从原始 NAV 序列计算日历数据（前端计算，替代 /monthly-returns + /daily-returns 两个 API 调用）
+ */
+async function loadCalendarData() {
   try {
-    const { data: res } = await portfolioApi.monthlyReturns(code, calYear.value)
-    const map = {}
-    res.data.forEach(item => { map[item.month] = item })
-    monthMap.value = map
-  } catch { monthMap.value = {} }
-}
+    const yearStart = `${calYear.value}-01-01`
+    const yearEnd = `${calYear.value}-12-31`
+    const { data: res } = await portfolioApi.nav(code, yearStart, yearEnd)
 
-async function fetchDailyData() {
-  try {
-    const { data: res } = await portfolioApi.dailyReturns(code, calYear.value, calMonth.value)
-    const map = {}
-    res.data.forEach(item => { map[item.date] = item })
-    dayDataMap.value = map
-  } catch { dayDataMap.value = {} }
+    // 前端计算月度收益
+    const monthly = calcMonthlyReturns(res.data, calYear.value)
+    const mmap = {}
+    monthly.forEach(item => { mmap[item.month] = item })
+    monthMap.value = mmap
+
+    // 前端计算每日收益
+    const dailyMap = calcDailyReturns(res.data)
+    dayDataMap.value = Object.fromEntries(dailyMap)
+  } catch {
+    monthMap.value = {}
+    dayDataMap.value = {}
+  }
 }
 
 async function fetchContribForPeriod(start, end) {
@@ -714,8 +739,8 @@ async function fetchContribForPeriod(start, end) {
 }
 
 async function renderCalendar() {
-  await fetchMonthlyData()
-  // Set default visible month if current one is not enabled
+  // 前端计算：从原始 NAV 序列一次性算出日收益和月收益
+  await loadCalendarData()
   if (!isMonthEnabled(calMonth.value)) {
     for (let m = 1; m <= 12; m++) {
       if (isMonthEnabled(m)) { calMonth.value = m; break }
@@ -727,7 +752,6 @@ async function renderCalendar() {
   const yearStart = `${calYear.value}-01-01`
   const yearEnd = `${calYear.value}-12-31`
   selectedPeriod.value = { type: 'year', start: yearStart, end: yearEnd }
-  await fetchDailyData()
   await fetchContribForPeriod(yearStart, yearEnd)
 }
 

@@ -10,6 +10,12 @@
   6. NAV 重算       — 全量/增量重新计算组合净值历史
 
 所有接口均要求用户认证（JWT），且只能操作当前登录用户自己的组合。
+
+计算职责说明：
+  本模块中的日收益、月收益、累计收益率等派生计算属于「便捷计算」——
+  后端提供加工好的数据方便前端直接使用，但这些计算理论上都可以在前端完成。
+  前端拿到原始 NAV 序列（nav + total_cost + date）后即可自行算出所有衍生指标，
+  计算压力可以从后端转移到客户端。各端点中标注「前端也可完成」的计算均属此类。
 """
 from datetime import date, datetime
 
@@ -129,7 +135,7 @@ def list_portfolios(
             .order_by(PortfolioNavHistory.nav_date.desc())
             .first()
         )
-        # 计算累计收益（总市值 - 总成本），仅当成本 > 0 时有效
+        # 便捷计算（前端也可完成）：累计收益 = 总市值 - 总成本，仅当成本 > 0 时有效
         cum_return = None
         if latest_nav and latest_nav.total_cost and latest_nav.total_cost > 0:
             cum_return = latest_nav.total_market_value - latest_nav.total_cost
@@ -140,6 +146,7 @@ def list_portfolios(
                 created_at=p.created_at,
                 return_start_date=p.return_start_date,
                 latest_nav=latest_nav.nav if latest_nav else None,
+                latest_total_cost=latest_nav.total_cost if latest_nav else None,
                 latest_cumulative_return=cum_return,
                 latest_return_rate=latest_nav.cum_return_rate if latest_nav else None,
             )
@@ -183,6 +190,7 @@ def create_portfolio(
         return_start_date=portfolio.return_start_date,
         holdings=[],
         latest_nav=None,
+        latest_total_cost=None,
         latest_cumulative_return=None,
         latest_return_rate=None,
     )
@@ -226,7 +234,7 @@ def get_portfolio(
         .first()
     )
 
-    # 累计收益 = 总市值 - 总成本
+    # 便捷计算（前端也可完成）：累计收益 = 总市值 - 总成本
     cum_return = None
     if latest_nav and latest_nav.total_cost and latest_nav.total_cost > 0:
         cum_return = latest_nav.total_market_value - latest_nav.total_cost
@@ -237,15 +245,17 @@ def get_portfolio(
         # 获取该股票的最新收盘价（从日 K 线表取最新一条）
         current_price = get_latest_close(h.stock_id, db)
 
-        # 计算持仓收益（需要有成本价和当前价）
+        # 便捷计算（前端也可完成）：持仓收益 = (现价 - 成本价) × 股数，拿到 current_price/cost_price/shares 即可算
         return_amount = None
         return_rate = None
         if h.cost_price is not None and current_price is not None and h.cost_price > 0:
             return_amount = (current_price - h.cost_price) * h.shares
             return_rate = (current_price / h.cost_price) - 1
 
-        # 计算个股当日涨跌幅：取最近两条日 K 线
+        # 便捷计算（前端也可完成）：个股当日收益率 = (今收 - 昨收) / 昨收
+        # 后端提供 prev_close 原始数据，前端拿到 current_price + prev_close 即可自行计算
         daily_return_rate = None
+        prev_close = None
         latest_two = (
             db.query(DailyKline)
             .filter(DailyKline.stock_id == h.stock_id)
@@ -253,9 +263,9 @@ def get_portfolio(
             .limit(2)
             .all()
         )
-        # 必须有恰好两条且昨日收盘 > 0 才能计算
         if len(latest_two) == 2 and latest_two[1].close > 0:
             daily_return_rate = (latest_two[0].close - latest_two[1].close) / latest_two[1].close
+            prev_close = latest_two[1].close
 
         holdings.append(
             HoldingResponse(
@@ -267,6 +277,7 @@ def get_portfolio(
                 cost_price_set_at=h.cost_price_set_at,
                 is_cost_locked=h.is_cost_locked,
                 current_price=current_price,
+                prev_close=prev_close,
                 daily_return_rate=daily_return_rate,
                 return_amount=return_amount,
                 return_rate=return_rate,
@@ -281,6 +292,7 @@ def get_portfolio(
         return_start_date=portfolio.return_start_date,
         holdings=holdings,
         latest_nav=latest_nav.nav if latest_nav else None,
+        latest_total_cost=latest_nav.total_cost if latest_nav else None,
         latest_cumulative_return=cum_return,
         latest_return_rate=latest_nav.cum_return_rate if latest_nav else None,
     )
@@ -601,7 +613,7 @@ def get_nav_history(
     # 按日期升序排列，便于计算逐日收益
     history = query.order_by(PortfolioNavHistory.nav_date.asc()).all()
 
-    # 遍历 NAV 记录，实时计算派生字段
+    # 便捷计算（前端也可完成）：遍历 NAV 记录计算日收益和累计收益率。前端拿到 [nav, total_cost] 序列即可算
     data = []
     prev_nav = None  # 前一日净值，用于计算日收益
     for h in history:
@@ -707,7 +719,7 @@ def get_daily_returns(
     if last_before:
         prev_nav = last_before.nav
 
-    # 逐日计算收益
+    # 便捷计算（前端也可完成）：逐日计算收益，前端拿到 NAV 序列后相邻相减即可
     data = []
     for h in history:
         return_amount = None
@@ -763,8 +775,9 @@ def get_monthly_returns(
 
     import calendar as cal_mod
 
+    # 便捷计算（前端也可完成）：按月份聚合 NAV 序列，月收益 = 月末净值 - 月初净值
     data = []
-    for month in range(1, 13):  # 遍历 12 个月
+    for month in range(1, 13):
         last_day = cal_mod.monthrange(year, month)[1]
         start_date = date(year, month, 1)
         end_date = date(year, month, last_day)
@@ -840,7 +853,7 @@ def get_contributions(
     start_date = date.fromisoformat(start) if start else None
     end_date = date.fromisoformat(end) if end else None
 
-    # 委托 service 层完成贡献计算
+    # 便捷计算（前端也可完成，但需跨表查个股K线，后端做更方便）：委托 service 层完成贡献计算
     items = calculate_contributions(portfolio, db, start_date, end_date)
 
     return ContributionResponse(

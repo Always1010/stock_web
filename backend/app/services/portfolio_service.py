@@ -13,6 +13,12 @@
   - router 层负责 HTTP 请求处理、参数校验、权限检查、响应组装
   - service 层负责纯业务逻辑，不感知 HTTP 协议细节
   - router 调用 service，service 不依赖 router
+
+计算职责说明：
+  本模块中的 daily_return、daily_return_rate、cum_return_rate 等派生字段已不再持久化计算，
+  改为在各 API 端点中从原始 NAV 数据（nav + total_cost + total_market_value）实时推导。
+  这些计算属于「便捷计算」—— 前端拿到原始 NAV 序列后同样可以算出，压力可从后端转移至客户端。
+  仅存储原始数据确保数据一致性，避免持久化派生字段带来的过期/不一致问题。
 """
 import logging
 import time
@@ -330,6 +336,8 @@ def calculate_contributions(
 ) -> list[ContributionItem]:
     """
     计算组合中每只持仓股票对整体收益的贡献度。
+
+    便捷计算（前端也可完成，但需跨表查个股K线，后端查询更高效）。
 
     计算逻辑:
       对每只持仓股票:
