@@ -18,6 +18,7 @@ class PortfolioSummary(BaseModel):
     created_at: datetime
     return_start_date: date | None = None
     latest_nav: float | None = None
+    latest_cumulative_return: float | None = None
     latest_return_rate: float | None = None
 
     model_config = {"from_attributes": True}
@@ -31,6 +32,9 @@ class HoldingResponse(BaseModel):
     cost_price: float | None = None
     cost_price_set_at: datetime | None = None
     is_cost_locked: bool
+    current_price: float | None = None
+    return_amount: float | None = None
+    return_rate: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -43,6 +47,7 @@ class PortfolioDetail(BaseModel):
     return_start_date: date | None = None
     holdings: list[HoldingResponse]
     latest_nav: float | None = None
+    latest_cumulative_return: float | None = None
     latest_return_rate: float | None = None
 
     model_config = {"from_attributes": True}
@@ -80,13 +85,27 @@ class NavHistoryResponse(BaseModel):
 
 class DailyReturnItem(BaseModel):
     date: str
+    return_amount: float | None = None
     return_rate: float | None = None
 
 
 class DailyReturnsResponse(BaseModel):
     portfolio_code: str
     year: int
+    month: int | None = None
     data: list[DailyReturnItem]
+
+
+class MonthlyReturnItem(BaseModel):
+    month: int
+    return_amount: float | None = None
+    return_rate: float | None = None
+
+
+class MonthlyReturnsResponse(BaseModel):
+    portfolio_code: str
+    year: int
+    data: list[MonthlyReturnItem]
 
 
 class ContributionItem(BaseModel):

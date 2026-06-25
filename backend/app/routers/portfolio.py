@@ -15,6 +15,8 @@ from app.schemas.portfolio import (
     DailyReturnItem,
     DailyReturnsResponse,
     HoldingResponse,
+    MonthlyReturnItem,
+    MonthlyReturnsResponse,
     NavHistoryItem,
     NavHistoryResponse,
     PortfolioCreate,
@@ -80,6 +82,9 @@ def list_portfolios(
             .order_by(PortfolioNavHistory.nav_date.desc())
             .first()
         )
+        cum_return = None
+        if latest_nav and latest_nav.total_cost and latest_nav.total_cost > 0:
+            cum_return = latest_nav.total_market_value - latest_nav.total_cost
         result.append(
             PortfolioSummary(
                 code=p.code,
@@ -87,6 +92,7 @@ def list_portfolios(
                 created_at=p.created_at,
                 return_start_date=p.return_start_date,
                 latest_nav=latest_nav.nav if latest_nav else None,
+                latest_cumulative_return=cum_return,
                 latest_return_rate=latest_nav.cum_return_rate if latest_nav else None,
             )
         )
@@ -118,6 +124,7 @@ def create_portfolio(
         return_start_date=portfolio.return_start_date,
         holdings=[],
         latest_nav=None,
+        latest_cumulative_return=None,
         latest_return_rate=None,
     )
 
@@ -144,8 +151,18 @@ def get_portfolio(
         .first()
     )
 
+    cum_return = None
+    if latest_nav and latest_nav.total_cost and latest_nav.total_cost > 0:
+        cum_return = latest_nav.total_market_value - latest_nav.total_cost
+
     holdings = []
     for h in portfolio.holdings:
+        current_price = get_latest_close(h.stock_id, db)
+        return_amount = None
+        return_rate = None
+        if h.cost_price is not None and current_price is not None and h.cost_price > 0:
+            return_amount = (current_price - h.cost_price) * h.shares
+            return_rate = (current_price / h.cost_price) - 1
         holdings.append(
             HoldingResponse(
                 id=h.id,
@@ -155,6 +172,9 @@ def get_portfolio(
                 cost_price=h.cost_price,
                 cost_price_set_at=h.cost_price_set_at,
                 is_cost_locked=h.is_cost_locked,
+                current_price=current_price,
+                return_amount=return_amount,
+                return_rate=return_rate,
             )
         )
 
@@ -166,6 +186,7 @@ def get_portfolio(
         return_start_date=portfolio.return_start_date,
         holdings=holdings,
         latest_nav=latest_nav.nav if latest_nav else None,
+        latest_cumulative_return=cum_return,
         latest_return_rate=latest_nav.cum_return_rate if latest_nav else None,
     )
 
@@ -429,11 +450,12 @@ def get_nav_history(
 @router.get("/{code}/daily-returns", response_model=DailyReturnsResponse)
 def get_daily_returns(
     code: str,
-    year: int = Query(..., description="Year for heatmap"),
+    year: int = Query(..., description="Year for calendar"),
+    month: int | None = Query(None, description="Optional month filter (1-12)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get daily returns for a specific year (for heatmap calendar)."""
+    """Get daily returns for a specific year/month (for calendar)."""
     portfolio = (
         db.query(Portfolio)
         .filter(Portfolio.code == code, Portfolio.user_id == current_user.id)
@@ -442,8 +464,14 @@ def get_daily_returns(
     if not portfolio:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio not found")
 
-    start_date = date(year, 1, 1)
-    end_date = date(year, 12, 31)
+    if month is not None:
+        import calendar
+        start_date = date(year, month, 1)
+        last_day = calendar.monthrange(year, month)[1]
+        end_date = date(year, month, last_day)
+    else:
+        start_date = date(year, 1, 1)
+        end_date = date(year, 12, 31)
 
     history = (
         db.query(PortfolioNavHistory)
@@ -459,12 +487,77 @@ def get_daily_returns(
     data = [
         DailyReturnItem(
             date=h.nav_date.isoformat(),
+            return_amount=h.daily_return,
             return_rate=h.daily_return_rate,
         )
         for h in history
     ]
 
     return DailyReturnsResponse(
+        portfolio_code=portfolio.code,
+        year=year,
+        month=month,
+        data=data,
+    )
+
+
+@router.get("/{code}/monthly-returns", response_model=MonthlyReturnsResponse)
+def get_monthly_returns(
+    code: str,
+    year: int = Query(..., description="Year for monthly aggregation"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get aggregated monthly returns for a year."""
+    portfolio = (
+        db.query(Portfolio)
+        .filter(Portfolio.code == code, Portfolio.user_id == current_user.id)
+        .first()
+    )
+    if not portfolio:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio not found")
+
+    import calendar as cal_mod
+
+    data = []
+    for month in range(1, 13):
+        last_day = cal_mod.monthrange(year, month)[1]
+        start_date = date(year, month, 1)
+        end_date = date(year, month, last_day)
+
+        month_navs = (
+            db.query(PortfolioNavHistory)
+            .filter(
+                PortfolioNavHistory.portfolio_id == portfolio.id,
+                PortfolioNavHistory.nav_date >= start_date,
+                PortfolioNavHistory.nav_date <= end_date,
+            )
+            .order_by(PortfolioNavHistory.nav_date.asc())
+            .all()
+        )
+
+        return_amount = None
+        return_rate = None
+
+        if month_navs:
+            # Sum daily returns for the month
+            daily_amounts = [n.daily_return for n in month_navs if n.daily_return is not None]
+            if daily_amounts:
+                return_amount = sum(daily_amounts)
+
+            # Use the cumulative return rate at the last trading day
+            last_record = month_navs[-1]
+            return_rate = last_record.cum_return_rate
+
+        data.append(
+            MonthlyReturnItem(
+                month=month,
+                return_amount=return_amount,
+                return_rate=return_rate,
+            )
+        )
+
+    return MonthlyReturnsResponse(
         portfolio_code=portfolio.code,
         year=year,
         data=data,
