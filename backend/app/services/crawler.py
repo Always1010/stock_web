@@ -642,8 +642,12 @@ def crawl_all_market_data() -> dict:
 # Index K-line
 # ═══════════════════════════════════════════════════════════
 
-def crawl_index_kline(code: str, name: str, db: Session, datalen: int = 400) -> int:
-    """Crawl daily K-line for a market index. Returns inserted count."""
+def crawl_index_kline(code: str, name: str, db: Session, datalen: int = 400, overwrite: bool = False) -> int:
+    """Crawl daily K-line for a market index. Returns inserted/affected count.
+
+    When overwrite=False (default): insert only missing dates, returns new records count.
+    When overwrite=True: delete all existing then reinsert fresh, returns total inserted.
+    """
     symbol = code  # Already in Sina format: sh000001, sz399001
 
     params = {
@@ -658,6 +662,36 @@ def crawl_index_kline(code: str, name: str, db: Session, datalen: int = 400) -> 
         if not isinstance(data, list) or len(data) == 0:
             return 0
 
+        if overwrite:
+            # ── Overwrite mode: delete all existing, then insert fresh ──
+            deleted = (
+                db.query(IndexKline)
+                .filter(IndexKline.code == code)
+                .delete()
+            )
+            inserted = 0
+            for item in data:
+                trade_date_str = item.get("day", "")
+                if len(trade_date_str) == 8:
+                    td = date(int(trade_date_str[:4]), int(trade_date_str[4:6]), int(trade_date_str[6:8]))
+                elif "-" in trade_date_str:
+                    td = date.fromisoformat(trade_date_str)
+                else:
+                    continue
+
+                db.add(IndexKline(
+                    code=code, name=name, trade_date=td,
+                    open=float(item["open"]), high=float(item["high"]),
+                    low=float(item["low"]), close=float(item["close"]),
+                    volume=int(float(item["volume"])),
+                    amount=float(item.get("amount", 0) or 0),
+                ))
+                inserted += 1
+
+            db.commit()
+            return inserted
+
+        # ── Insert-only mode (default) ──
         inserted = 0
         for item in data:
             trade_date_str = item.get("day", "")

@@ -68,4 +68,9 @@ export const portfolioApi = {
   contributions: (code, start, end) => api.get(`/portfolios/${code}/contributions`, { params: { start, end } }),
 }
 
+// ── Market ────────────────────────────────────────
+export const marketApi = {
+  refreshIndex: (code) => api.post(`/market/indices/${code}/refresh`),
+}
+
 export default api
