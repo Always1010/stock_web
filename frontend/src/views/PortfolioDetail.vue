@@ -430,7 +430,10 @@ async function handleFullDataRefresh() {
   try {
     const { data } = await portfolioApi.refreshData(code)
     ElMessage.success(data.message || '全量数据更新完成')
+    rawHoldings.value = []  // 清除 K 线缓存，若当前在日历页则立即重新加载
     await refresh()
+    await nextTick()
+    if (tab.value === 'calendar') renderCalendar()
   } catch { /* handled */ }
   finally { refreshingData.value = false }
 }
@@ -440,7 +443,10 @@ async function handleIncrDataRefresh() {
   try {
     const { data } = await portfolioApi.refreshDataIncr(code)
     ElMessage.success(data.message || '增量数据更新完成')
+    rawHoldings.value = []  // 清除 K 线缓存，若当前在日历页则立即重新加载
     await refresh()
+    await nextTick()
+    if (tab.value === 'calendar') renderCalendar()
   } catch { /* handled */ }
   finally { refreshingData.value = false }
 }
@@ -720,7 +726,9 @@ function fetchContribForPeriod(start, end) {
   try {
     if (rawHoldings.value.length === 0) return
     const items = calcContributions(rawHoldings.value, start, end)
-    if (!calCc && calContribRef.value) calCc = echarts.init(calContribRef.value)
+    // 每次重新 init 图表实例，避免 DOM 失效导致卡死
+    calCc?.dispose(); calCc = null
+    if (calContribRef.value) calCc = echarts.init(calContribRef.value)
     if (!calCc) return
     const vals = items.map(d => d.return_amount ?? 0)
     calCc.setOption({
@@ -749,6 +757,8 @@ function fetchContribForPeriod(start, end) {
 }
 
 async function renderCalendar() {
+  // 销毁旧图表实例，确保后续重新绑定新 DOM
+  calCc?.dispose(); calCc = null
   // 首次加载全量 K 线数据（仅一次），后续切换年份纯前端计算
   if (rawHoldings.value.length === 0) await loadAllKlineData()
   computeCalendarForYear()
