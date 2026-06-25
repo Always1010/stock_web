@@ -149,7 +149,6 @@
       <div class="chart-tabs">
         <button :class="['tab', { active: tab === 'curve' }]" @click="tab='curve';nextTick(renderCurve)">收益曲线</button>
         <button :class="['tab', { active: tab === 'calendar' }]" @click="tab='calendar';nextTick(renderCalendar)">收益日历</button>
-        <button :class="['tab', { active: tab === 'contrib' }]" @click="tab='contrib';nextTick(renderContribution)">贡献分析</button>
       </div>
 
       <div v-show="tab === 'curve'" class="chart-card">
@@ -225,9 +224,6 @@
         <div ref="calContribRef" class="chart-box" style="height:300px"></div>
       </div>
 
-      <div v-show="tab === 'contrib'" class="chart-card">
-        <div ref="contribRef" class="chart-box"></div>
-      </div>
     </div>
 
     <!-- Add Dialog -->
@@ -379,8 +375,8 @@ const refreshingData = ref(false)
 const refreshingNav = ref(false)
 
 // Charts
-const curveRef = ref(null), contribRef = ref(null), calContribRef = ref(null)
-let cc = null, oc = null, calCc = null
+const curveRef = ref(null), calContribRef = ref(null)
+let cc = null, calCc = null
 
 async function refresh() {
   const { data } = await portfolioApi.detail(code)
@@ -458,7 +454,6 @@ async function handleFullNavRecalc() {
     await nextTick()
     if (tab.value === 'curve') renderCurve()
     else if (tab.value === 'calendar') renderCalendar()
-    else if (tab.value === 'contrib') renderContribution()
   } catch { /* handled */ }
   finally { refreshingNav.value = false }
 }
@@ -472,7 +467,6 @@ async function handleIncrNavRecalc() {
     await nextTick()
     if (tab.value === 'curve') renderCurve()
     else if (tab.value === 'calendar') renderCalendar()
-    else if (tab.value === 'contrib') renderContribution()
   } catch { /* handled */ }
   finally { refreshingNav.value = false }
 }
@@ -790,27 +784,10 @@ function isDayEnabled(dateStr) {
   return dateStr >= rsd
 }
 
-async function renderContribution() {
-  const { data: res } = await portfolioApi.contributions(code)
-  if (!oc && contribRef.value) oc = echarts.init(contribRef.value)
-  if (!oc) return
-  const vals = res.data.map(d => d.return_amount ?? 0)
-  oc.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#fff', borderColor: '#e5e7eb', textStyle: { color: '#1e2130' } },
-    grid: { left: '5%', right: '10%', top: 10, bottom: 10 },
-    xAxis: { type: 'value', splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#9ca3af', formatter: '¥{value}' } },
-    yAxis: { type: 'category', data: res.data.map(d => d.stock_name), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#1e2130', fontWeight: 500 } },
-    series: [{
-      type: 'bar', data: vals.map((v, i) => ({ value: v, itemStyle: { color: v >= 0 ? '#e15241' : '#1aad56', borderRadius: [0, 4, 4, 0] } })),
-      label: { show: true, position: 'right', color: '#6b7280', formatter: p => '¥' + Math.abs(p.value).toFixed(0) },
-    }],
-  }, true)
-}
-
 onMounted(async () => { await refresh(); await nextTick(); renderCurve() })
-const hr = () => { cc?.resize(); oc?.resize(); calCc?.resize() }
+const hr = () => { cc?.resize(); calCc?.resize() }
 window.addEventListener('resize', hr)
-onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); oc?.dispose(); calCc?.dispose() })
+onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); calCc?.dispose() })
 </script>
 
 <style scoped>
