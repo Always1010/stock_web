@@ -141,16 +141,11 @@ def update_portfolio_nav(portfolio: Portfolio, db: Session) -> PortfolioNavHisto
         .first()
     )
 
-    # Calculate returns
+    # 以下派生字段已在 API 端点中实时计算（daily-returns/monthly-returns/nav 端点），
+    # 此处不再持久化计算，仅存储原始净值数据 nav/total_cost/total_market_value
     daily_return = None
     daily_return_rate = None
-    if yesterday_nav and yesterday_nav.nav > 0:
-        daily_return = total_market_value - yesterday_nav.nav
-        daily_return_rate = daily_return / yesterday_nav.nav
-
     cum_return_rate = None
-    if total_cost > 0:
-        cum_return_rate = (total_market_value / total_cost) - 1
 
     # Check if today's NAV already exists (upsert)
     existing = (
@@ -270,8 +265,22 @@ def calculate_contributions(
         return_rate = None
         contribution_pct = None
 
-        # Use start_price as base for period returns, fall back to cost_price
-        base_price = start_price if start_price is not None else holding.cost_price
+        # 单日查询：用前一交易日收盘价作为基准，计算当日个股收益
+        if start_date and end_date and start_date == end_date and end_price is not None:
+            prev_kline = (
+                db.query(DailyKline)
+                .filter(DailyKline.stock_id == stock.id, DailyKline.trade_date < start_date)
+                .order_by(DailyKline.trade_date.desc())
+                .first()
+            )
+            if prev_kline and prev_kline.close > 0:
+                base_price = prev_kline.close
+            else:
+                base_price = start_price
+        else:
+            # 多日查询：用期间起始价作为基准
+            base_price = start_price if start_price is not None else holding.cost_price
+
         if base_price is not None and end_price is not None and base_price > 0:
             return_amount = (end_price - base_price) * holding.shares
             return_rate = (end_price / base_price) - 1
@@ -407,26 +416,10 @@ def _compute_nav_for_date(
         if holding.cost_price is not None:
             total_cost += holding.shares * holding.cost_price
 
-    # Previous NAV record for daily return
-    prev_nav = (
-        db.query(PortfolioNavHistory)
-        .filter(
-            PortfolioNavHistory.portfolio_id == portfolio.id,
-            PortfolioNavHistory.nav_date < target_date,
-        )
-        .order_by(PortfolioNavHistory.nav_date.desc())
-        .first()
-    )
-
+    # 以下派生字段已在 API 端点中实时计算，此处不再计算，仅返回原始净值数据
     daily_return = None
     daily_return_rate = None
-    if prev_nav and prev_nav.nav > 0:
-        daily_return = total_market_value - prev_nav.nav
-        daily_return_rate = daily_return / prev_nav.nav
-
     cum_return_rate = None
-    if total_cost > 0:
-        cum_return_rate = (total_market_value / total_cost) - 1
 
     return total_market_value, total_cost, daily_return, daily_return_rate, cum_return_rate
 
