@@ -32,7 +32,10 @@ from app.schemas.portfolio import (
     ContributionResponse,
     DailyReturnItem,
     DailyReturnsResponse,
+    HoldingKlineItem,
+    HoldingsKlineResponse,
     HoldingResponse,
+    KlinePoint,
     MonthlyReturnItem,
     MonthlyReturnsResponse,
     NavHistoryItem,
@@ -817,6 +820,52 @@ def get_monthly_returns(
         portfolio_code=portfolio.code,
         year=year,
         data=data,
+    )
+
+
+@router.get("/{code}/holdings-kline", response_model=HoldingsKlineResponse)
+def get_holdings_kline(
+    code: str,
+    start: str | None = Query(None, description="Start date YYYY-MM-DD"),
+    end: str | None = Query(None, description="End date YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取组合持仓的原始 K 线数据，供前端自行计算 NAV 序列、日历收益、贡献分析。
+
+    此端点仅返回原始数据（close 价格），不做任何衍生计算。
+    前端拿到后可以：
+      - 算 NAV 序列：对每日 Σ(close × shares)
+      - 算日收益：相邻 NAV 相减
+      - 算月收益：月末 NAV - 月初 NAV
+      - 算贡献：个股在期间内的价格变化 × 股数
+    """
+    portfolio = _get_user_portfolio(code, db, current_user)
+
+    holdings_data = []
+    for h in portfolio.holdings:
+        query = db.query(DailyKline).filter(DailyKline.stock_id == h.stock_id)
+        if start:
+            query = query.filter(DailyKline.trade_date >= date.fromisoformat(start))
+        if end:
+            query = query.filter(DailyKline.trade_date <= date.fromisoformat(end))
+        klines = query.order_by(DailyKline.trade_date.asc()).all()
+
+        holdings_data.append(
+            HoldingKlineItem(
+                stock_code=h.stock.code,
+                stock_name=h.stock.name,
+                shares=h.shares,
+                cost_price=h.cost_price,
+                kline=[KlinePoint(date=k.trade_date.isoformat(), close=k.close) for k in klines],
+            )
+        )
+
+    return HoldingsKlineResponse(
+        portfolio_code=portfolio.code,
+        return_start_date=portfolio.return_start_date,
+        holdings=holdings_data,
     )
 
 
