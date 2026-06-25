@@ -96,7 +96,53 @@
           <h3>添加股票持仓</h3>
           <div class="field">
             <label>股票代码</label>
-            <input v-model="addForm.stock_code" placeholder="例如：600519" />
+            <div class="stock-search">
+              <input
+                v-model="searchQuery"
+                type="text"
+                placeholder="输入股票代码或名称搜索..."
+                autocomplete="off"
+                @focus="searchDropdown = searchResults.length > 0"
+                @blur="onSearchBlur"
+                @keydown.escape.prevent="closeSearchDropdown"
+                @keydown.up.prevent="moveSearchUp"
+                @keydown.down.prevent="moveSearchDown"
+                @keydown.enter.prevent="handleSearchEnter"
+              />
+              <div v-if="searchDropdown && (searchLoading || searchResults.length > 0)" class="stock-dropdown">
+                <div v-if="searchLoading" class="stock-dd-loading">搜索中...</div>
+                <template v-else>
+                  <div
+                    v-for="(s, i) in searchResults" :key="s.code"
+                    class="stock-dd-row"
+                    :class="{ highlighted: highlightIdx === i }"
+                    @mousedown.prevent="selectStock(s)"
+                  >
+                    <div class="stock-dd-info">
+                      <span class="stock-dd-code">{{ s.code }}</span>
+                      <span class="stock-dd-name">{{ s.name }}</span>
+                      <span class="stock-dd-ex">{{ s.exchange === 'SH' ? '沪' : s.exchange === 'SZ' ? '深' : '京' }}</span>
+                    </div>
+                    <div class="stock-dd-price">
+                      <span v-if="s.latest_close != null" class="stock-dd-close">{{ s.latest_close.toFixed(2) }}</span>
+                      <span v-else class="stock-dd-close">--</span>
+                      <span
+                        v-if="s.change_pct != null"
+                        class="stock-dd-chg"
+                        :class="{ up: s.change_pct > 0, down: s.change_pct < 0 }"
+                      >
+                        {{ s.change_pct > 0 ? '+' : '' }}{{ s.change_pct.toFixed(2) }}%
+                      </span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <div v-if="addForm.stock_code && selectedStockName" class="stock-selected">
+                <span class="stock-sel-label">已选：</span>
+                <span class="stock-sel-code">{{ addForm.stock_code }}</span>
+                <span class="stock-sel-name">{{ selectedStockName }}</span>
+              </div>
+            </div>
           </div>
           <div class="field">
             <label>持仓股数</label>
@@ -135,10 +181,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
-import { portfolioApi } from '../api'
+import { portfolioApi, stockApi } from '../api'
 import { ElMessageBox } from 'element-plus'
 
 const route = useRoute()
@@ -161,6 +207,15 @@ const showCost = ref(false)
 const addForm = ref({ stock_code: '', shares: 100, cost_price: null })
 const costForm = ref({ holding_id: null, cost_price: 0 })
 
+// Stock search in add dialog
+const searchQuery = ref('')
+const searchResults = ref([])
+const searchLoading = ref(false)
+const searchDropdown = ref(false)
+const highlightIdx = ref(-1)
+const selectedStockName = ref('')
+let searchTimer = null
+
 // Charts
 const curveRef = ref(null), heatRef = ref(null), contribRef = ref(null)
 let cc = null, hc = null, oc = null
@@ -168,6 +223,73 @@ let cc = null, hc = null, oc = null
 async function refresh() {
   const { data } = await portfolioApi.detail(code)
   portfolio.value = data
+}
+
+// Reset search when dialog opens/closes
+watch(showAdd, (v) => {
+  if (!v) {
+    searchQuery.value = ''
+    searchResults.value = []
+    searchDropdown.value = false
+    highlightIdx.value = -1
+    selectedStockName.value = ''
+  }
+})
+
+// ── Stock search ──
+watch(searchQuery, () => {
+  clearTimeout(searchTimer)
+  highlightIdx.value = -1
+  if (!searchQuery.value.trim()) {
+    searchResults.value = []
+    searchDropdown.value = false
+    return
+  }
+  searchTimer = setTimeout(async () => {
+    searchLoading.value = true
+    searchDropdown.value = true
+    try {
+      const { data } = await stockApi.search(searchQuery.value.trim(), 8)
+      searchResults.value = data.items
+    } finally {
+      searchLoading.value = false
+    }
+  }, 200)
+})
+
+function selectStock(s) {
+  addForm.value.stock_code = s.code
+  selectedStockName.value = s.name
+  closeSearchDropdown()
+}
+
+function closeSearchDropdown() {
+  clearTimeout(searchTimer)
+  searchDropdown.value = false
+  searchQuery.value = ''
+  searchResults.value = []
+  highlightIdx.value = -1
+}
+
+function onSearchBlur() {
+  setTimeout(() => { searchDropdown.value = false }, 150)
+}
+
+function moveSearchUp() {
+  if (!searchDropdown.value || searchResults.value.length === 0) return
+  highlightIdx.value = highlightIdx.value <= 0 ? searchResults.value.length - 1 : highlightIdx.value - 1
+}
+
+function moveSearchDown() {
+  if (!searchDropdown.value || searchResults.value.length === 0) return
+  highlightIdx.value = highlightIdx.value >= searchResults.value.length - 1 ? 0 : highlightIdx.value + 1
+}
+
+function handleSearchEnter() {
+  if (!searchDropdown.value || searchResults.value.length === 0) return
+  if (highlightIdx.value >= 0 && highlightIdx.value < searchResults.value.length) {
+    selectStock(searchResults.value[highlightIdx.value])
+  }
 }
 
 // ── Holdings ──
@@ -180,6 +302,8 @@ async function handleAdd() {
     })
     showAdd.value = false
     addForm.value = { stock_code: '', shares: 100, cost_price: null }
+    selectedStockName.value = ''
+    searchQuery.value = ''
     refresh()
   } catch { /* handled */ }
 }
@@ -335,4 +459,61 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); hc?
 .dialog-actions { display: flex; gap: var(--space-3); justify-content: flex-end; margin-top: var(--space-5); }
 .btn-cancel { height: 36px; padding: 0 var(--space-4); background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: var(--text-sm); font-weight: 500; cursor: pointer; font-family: inherit; color: var(--color-text-secondary); }
 .btn-cancel:hover { background: var(--color-bg); }
+
+/* ── Stock search dropdown ── */
+.stock-search { position: relative; }
+.stock-search input {
+  width: 100%; height: 40px; padding: 0 var(--space-3);
+  background: var(--color-bg); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); font-size: var(--text-base);
+  font-family: inherit; outline: none;
+  transition: border-color var(--transition-fast);
+}
+.stock-search input:focus { border-color: var(--color-primary); }
+
+.stock-dropdown {
+  position: absolute; top: 44px; left: 0; right: 0;
+  background: var(--color-surface); border-radius: 8px;
+  box-shadow: var(--shadow-xl); border: 1px solid var(--color-border);
+  max-height: 280px; overflow-y: auto; z-index: 210;
+}
+.stock-dd-loading {
+  padding: var(--space-4); text-align: center;
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+
+.stock-dd-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-2) var(--space-3); cursor: pointer;
+  border-bottom: 1px solid var(--color-divider);
+  transition: background var(--transition-fast);
+}
+.stock-dd-row:last-child { border-bottom: none; }
+.stock-dd-row:hover { background: var(--color-bg); }
+.stock-dd-row.highlighted { background: var(--color-primary-light); }
+
+.stock-dd-info { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.stock-dd-code { font-family: var(--font-mono); font-weight: 600; font-size: 13px; }
+.stock-dd-name { font-size: 13px; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stock-dd-ex {
+  font-size: 10px; padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+  background: var(--color-bg); color: var(--color-text-muted);
+}
+
+.stock-dd-price { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; margin-left: var(--space-3); }
+.stock-dd-close { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+.stock-dd-chg { font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 4px; min-width: 56px; text-align: center; }
+.stock-dd-chg.up { color: #fff; background: var(--color-up); }
+.stock-dd-chg.down { color: #fff; background: var(--color-down); }
+
+/* ── Selected stock confirmation ── */
+.stock-selected {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: var(--space-2); padding: var(--space-2) var(--space-3);
+  background: var(--color-primary-light); border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+.stock-sel-label { color: var(--color-primary); font-weight: 500; }
+.stock-sel-code { font-family: var(--font-mono); font-weight: 600; }
+.stock-sel-name { color: var(--color-text-secondary); }
 </style>
