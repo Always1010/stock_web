@@ -1,6 +1,7 @@
 """Portfolio business logic: NAV calculation, cost price, contributions."""
 import logging
-from datetime import date, datetime
+import time
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -298,3 +299,303 @@ def calculate_contributions(
         )
 
     return items
+
+
+# ── Portfolio-level Data Refresh ─────────────────────────────────
+
+def refresh_portfolio_kline(
+    portfolio: Portfolio,
+    db: Session,
+    overwrite: bool = False,
+) -> dict:
+    """
+    Iterate all holdings and crawl kline data for each stock.
+
+    When overwrite=True: full refresh (delete + re-insert all).
+    When overwrite=False: incremental (insert only missing dates).
+    """
+    from app.services.crawler import crawl_kline_for_stock
+
+    holdings = list(portfolio.holdings)
+    if not holdings:
+        return {
+            "portfolio_code": portfolio.code,
+            "total_stocks": 0,
+            "processed": 0,
+            "total_affected": 0,
+            "errors": 0,
+        }
+
+    total_affected = 0
+    processed = 0
+    errors = 0
+
+    for holding in holdings:
+        stock = holding.stock
+        if not stock:
+            continue
+        try:
+            affected = crawl_kline_for_stock(stock, db, overwrite=overwrite)
+            total_affected += affected
+            processed += 1
+            time.sleep(0.5)  # rate-limit between stocks
+        except Exception as e:
+            errors += 1
+            logger.error(f"Failed to refresh {stock.code}: {e}")
+
+    if total_affected > 0:
+        db.commit()
+
+    return {
+        "portfolio_code": portfolio.code,
+        "total_stocks": len(holdings),
+        "processed": processed,
+        "total_affected": total_affected,
+        "errors": errors,
+    }
+
+
+# ── NAV Recalculation Helpers ────────────────────────────────────
+
+def _get_holdings_trading_dates(
+    portfolio: Portfolio,
+    db: Session,
+    start_date: date,
+    end_date: date,
+) -> list[date]:
+    """Get distinct trading dates across all holdings' stocks in [start_date, end_date]."""
+    stock_ids = [h.stock_id for h in portfolio.holdings]
+    if not stock_ids:
+        return []
+
+    rows = (
+        db.query(DailyKline.trade_date)
+        .filter(
+            DailyKline.stock_id.in_(stock_ids),
+            DailyKline.trade_date >= start_date,
+            DailyKline.trade_date <= end_date,
+        )
+        .distinct()
+        .order_by(DailyKline.trade_date.asc())
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+def _compute_nav_for_date(
+    portfolio: Portfolio,
+    db: Session,
+    target_date: date,
+) -> tuple[float, float, float | None, float | None, float | None]:
+    """
+    Compute NAV metrics for a single date.
+
+    Returns (total_market_value, total_cost, daily_return, daily_return_rate, cum_return_rate).
+    """
+    total_market_value = 0.0
+    total_cost = 0.0
+
+    for holding in portfolio.holdings:
+        close = get_latest_close(
+            holding.stock_id, db, before_date=target_date + timedelta(days=1)
+        )
+        if close is None:
+            continue
+        total_market_value += holding.shares * close
+        if holding.cost_price is not None:
+            total_cost += holding.shares * holding.cost_price
+
+    # Previous NAV record for daily return
+    prev_nav = (
+        db.query(PortfolioNavHistory)
+        .filter(
+            PortfolioNavHistory.portfolio_id == portfolio.id,
+            PortfolioNavHistory.nav_date < target_date,
+        )
+        .order_by(PortfolioNavHistory.nav_date.desc())
+        .first()
+    )
+
+    daily_return = None
+    daily_return_rate = None
+    if prev_nav and prev_nav.nav > 0:
+        daily_return = total_market_value - prev_nav.nav
+        daily_return_rate = daily_return / prev_nav.nav
+
+    cum_return_rate = None
+    if total_cost > 0:
+        cum_return_rate = (total_market_value / total_cost) - 1
+
+    return total_market_value, total_cost, daily_return, daily_return_rate, cum_return_rate
+
+
+# ── Full & Incremental NAV Recalculation ─────────────────────────
+
+def recalculate_portfolio_nav(
+    portfolio: Portfolio,
+    db: Session,
+    start_date: date | None = None,
+) -> dict:
+    """
+    Full NAV recalculation: delete NAV from start_date onwards,
+    then recompute day-by-day from start_date to today.
+
+    If start_date is None, uses portfolio.return_start_date or falls back to today.
+    """
+    today = today_cst()
+    if start_date is None:
+        start_date = portfolio.return_start_date or today
+
+    if start_date > today:
+        return {
+            "portfolio_code": portfolio.code,
+            "start_date": str(start_date),
+            "end_date": str(today),
+            "records_created": 0,
+            "message": "起始日期在未来，无需计算",
+        }
+
+    # Delete existing NAV records from start_date onwards
+    deleted = (
+        db.query(PortfolioNavHistory)
+        .filter(
+            PortfolioNavHistory.portfolio_id == portfolio.id,
+            PortfolioNavHistory.nav_date >= start_date,
+        )
+        .delete()
+    )
+
+    # Get trading dates
+    trading_dates = _get_holdings_trading_dates(portfolio, db, start_date, today)
+    if not trading_dates:
+        db.commit()
+        return {
+            "portfolio_code": portfolio.code,
+            "start_date": str(start_date),
+            "end_date": str(today),
+            "records_created": 0,
+            "message": "无可用交易数据",
+        }
+
+    created = 0
+    for trade_date in trading_dates:
+        mv, cost, dr, drr, crr = _compute_nav_for_date(portfolio, db, trade_date)
+
+        if mv == 0 and cost == 0:
+            continue
+
+        nav_record = PortfolioNavHistory(
+            portfolio_id=portfolio.id,
+            nav_date=trade_date,
+            nav=mv,
+            daily_return=dr,
+            daily_return_rate=drr,
+            cum_return_rate=crr,
+            total_cost=cost,
+            total_market_value=mv,
+        )
+        db.add(nav_record)
+        created += 1
+
+        if created % 50 == 0:
+            db.commit()
+
+    if created > 0:
+        db.commit()
+
+    logger.info(
+        f"NAV recalc for {portfolio.code}: deleted {deleted}, created {created}"
+    )
+    return {
+        "portfolio_code": portfolio.code,
+        "start_date": str(start_date),
+        "end_date": str(today),
+        "records_created": created,
+    }
+
+
+def fill_missing_nav(portfolio: Portfolio, db: Session) -> dict:
+    """
+    Incremental NAV update: find the latest NAV date,
+    then fill all trading days from next day through today.
+    """
+    today = today_cst()
+
+    # Latest NAV date
+    latest_nav = (
+        db.query(PortfolioNavHistory)
+        .filter(PortfolioNavHistory.portfolio_id == portfolio.id)
+        .order_by(PortfolioNavHistory.nav_date.desc())
+        .first()
+    )
+
+    if latest_nav and latest_nav.nav_date >= today:
+        return {
+            "portfolio_code": portfolio.code,
+            "start_date": str(latest_nav.nav_date),
+            "end_date": str(today),
+            "records_created": 0,
+            "message": "收益数据已是最新",
+        }
+
+    # Determine start point
+    if latest_nav:
+        start_from = latest_nav.nav_date + timedelta(days=1)
+    elif portfolio.return_start_date:
+        start_from = portfolio.return_start_date
+    else:
+        earliest = _get_holdings_trading_dates(
+            portfolio, db, date(2000, 1, 1), today
+        )
+        if not earliest:
+            return {
+                "portfolio_code": portfolio.code,
+                "start_date": str(today),
+                "end_date": str(today),
+                "records_created": 0,
+                "message": "无可用交易数据",
+            }
+        start_from = earliest[0]
+
+    trading_dates = _get_holdings_trading_dates(portfolio, db, start_from, today)
+    if not trading_dates:
+        return {
+            "portfolio_code": portfolio.code,
+            "start_date": str(start_from),
+            "end_date": str(today),
+            "records_created": 0,
+            "message": "无新的交易日需要填补",
+        }
+
+    created = 0
+    for trade_date in trading_dates:
+        mv, cost, dr, drr, crr = _compute_nav_for_date(portfolio, db, trade_date)
+
+        if mv == 0 and cost == 0:
+            continue
+
+        nav_record = PortfolioNavHistory(
+            portfolio_id=portfolio.id,
+            nav_date=trade_date,
+            nav=mv,
+            daily_return=dr,
+            daily_return_rate=drr,
+            cum_return_rate=crr,
+            total_cost=cost,
+            total_market_value=mv,
+        )
+        db.add(nav_record)
+        created += 1
+
+        if created % 50 == 0:
+            db.commit()
+
+    if created > 0:
+        db.commit()
+
+    return {
+        "portfolio_code": portfolio.code,
+        "start_date": str(start_from),
+        "end_date": str(today),
+        "records_created": created,
+    }
