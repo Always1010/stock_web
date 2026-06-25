@@ -16,6 +16,12 @@
           <div class="hero-value">¥{{ portfolio.latest_nav != null ? portfolio.latest_nav.toFixed(2) : '--' }}</div>
         </div>
         <div>
+          <div class="stat-label">累计收益</div>
+          <div :class="['hero-value', (portfolio.latest_cumulative_return ?? 0) >= 0 ? 'up' : 'down']">
+            {{ portfolio.latest_cumulative_return != null ? (portfolio.latest_cumulative_return >= 0 ? '¥' : '-¥') + Math.abs(portfolio.latest_cumulative_return).toFixed(2) : '--' }}
+          </div>
+        </div>
+        <div>
           <div class="stat-label">累计收益率</div>
           <div :class="['hero-value', (portfolio.latest_return_rate ?? 0) >= 0 ? 'up' : 'down']">
             {{ portfolio.latest_return_rate != null ? ((portfolio.latest_return_rate * 100).toFixed(2) + '%') : '--' }}
@@ -29,18 +35,21 @@
       <div class="action-group">
         <label class="action-label">收益起始日</label>
         <div class="date-picker-wrap">
-          <input
-            type="date"
-            :value="returnStartDateStr"
-            @change="handleReturnStartDateChange"
-            class="date-input"
-          />
-          <button
-            v-if="returnStartDateStr"
-            class="action-btn-sm"
-            @click="handleClearReturnStartDate"
-            title="清除起始日"
-          >&times;</button>
+          <template v-if="!editingStartDate">
+            <span :class="['date-display', { muted: !returnStartDateStr }]">{{ returnStartDateStr || '未设定' }}</span>
+            <button class="action-btn-sm" @click="startEditStartDate" title="编辑起始日">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+          </template>
+          <template v-else>
+            <input
+              type="date"
+              v-model="editStartDateVal"
+              class="date-input"
+            />
+            <button class="action-btn-sm confirm" @click="confirmStartDate" title="确认">✓</button>
+            <button class="action-btn-sm" @click="cancelStartDate" title="取消">✕</button>
+          </template>
         </div>
       </div>
 
@@ -95,6 +104,9 @@
           <span class="col-n">名称</span>
           <span class="col-s">持仓</span>
           <span class="col-p">成本价</span>
+          <span class="col-cp">现价</span>
+          <span class="col-ra">累计收益</span>
+          <span class="col-rr">收益率</span>
           <span class="col-a"></span>
         </div>
         <div v-for="h in portfolio.holdings" :key="h.id" class="ht-row">
@@ -104,6 +116,18 @@
           <span class="col-p">
             <span v-if="h.cost_price != null">¥{{ h.cost_price.toFixed(3) }}</span>
             <span v-else class="unset">未设定</span>
+          </span>
+          <span class="col-cp">
+            <span v-if="h.current_price != null">¥{{ h.current_price.toFixed(2) }}</span>
+            <span v-else class="unset">--</span>
+          </span>
+          <span class="col-ra">
+            <span v-if="h.return_amount != null" :class="moneyClass(h.return_amount)">{{ fmtMoney(h.return_amount) }}</span>
+            <span v-else class="unset">--</span>
+          </span>
+          <span class="col-rr">
+            <span v-if="h.return_rate != null" :class="rateClass(h.return_rate)">{{ fmtRate(h.return_rate) }}</span>
+            <span v-else class="unset">--</span>
           </span>
           <span class="col-a">
             <button v-if="!h.is_cost_locked" class="btn-mini" @click="openSetCost(h)">设定成本</button>
@@ -119,7 +143,7 @@
     <div class="section">
       <div class="chart-tabs">
         <button :class="['tab', { active: tab === 'curve' }]" @click="tab='curve';nextTick(renderCurve)">收益曲线</button>
-        <button :class="['tab', { active: tab === 'heatmap' }]" @click="tab='heatmap';nextTick(renderHeatmap)">收益日历</button>
+        <button :class="['tab', { active: tab === 'calendar' }]" @click="tab='calendar';nextTick(renderCalendar)">收益日历</button>
         <button :class="['tab', { active: tab === 'contrib' }]" @click="tab='contrib';nextTick(renderContribution)">贡献分析</button>
       </div>
 
@@ -130,13 +154,66 @@
         <div ref="curveRef" class="chart-box"></div>
       </div>
 
-      <div v-show="tab === 'heatmap'" class="chart-card">
-        <div class="chart-range">
-          <select v-model="hy" @change="renderHeatmap" class="year-select">
-            <option v-for="y in years" :key="y" :value="y">{{ y }} 年</option>
-          </select>
+      <div v-show="tab === 'calendar'" class="chart-card">
+        <!-- Year Selector -->
+        <div class="cal-year-nav">
+          <button class="cal-nav-btn" @click="calYear--;renderCalendar()">&lt;</button>
+          <span class="cal-year-label">{{ calYear }} 年</span>
+          <button class="cal-nav-btn" @click="calYear++;renderCalendar()">&gt;</button>
         </div>
-        <div ref="heatRef" class="chart-box" style="height:240px"></div>
+
+        <!-- Yearly Month Calendar -->
+        <div class="cal-section-label">年度月历</div>
+        <div class="cal-month-grid">
+          <div
+            v-for="m in 12" :key="'m'+m"
+            :class="['cal-month-cell', {
+              active: calMonth === m,
+              disabled: !isMonthEnabled(m),
+            }]"
+            @click="selectMonth(m)"
+          >
+            <div class="cal-cell-month">{{ m }}月</div>
+            <div v-if="monthMap[m]" :class="['cal-cell-amount', moneyClass(monthMap[m].return_amount ?? 0)]">
+              {{ monthMap[m].return_amount != null ? fmtMoney(monthMap[m].return_amount) : '--' }}
+            </div>
+            <div v-if="monthMap[m]" :class="['cal-cell-rate', rateClass(monthMap[m].return_rate ?? 0)]">
+              {{ monthMap[m].return_rate != null ? fmtRate(monthMap[m].return_rate) : '--' }}
+            </div>
+            <div v-else class="cal-cell-no-data">无数据</div>
+          </div>
+        </div>
+
+        <!-- Monthly Day Calendar -->
+        <div class="cal-section-label">月度日历 — {{ calYear }}年{{ calMonth }}月</div>
+        <div class="cal-day-header">
+          <span v-for="d in dayHeaders" :key="d" class="cal-dh-cell">{{ d }}</span>
+        </div>
+        <div class="cal-day-grid">
+          <div
+            v-for="(cell, idx) in dayCells" :key="'d'+idx"
+            :class="['cal-day-cell', {
+              active: cell.day != null && selectedDay === cell.day,
+              disabled: cell.day != null && !isDayEnabled(cell.dateStr),
+              empty: cell.day == null,
+            }]"
+            @click="cell.day != null && isDayEnabled(cell.dateStr) && selectDay(cell.day, cell.dateStr)"
+          >
+            <template v-if="cell.day != null">
+              <div class="cal-cell-day">{{ cell.day }}</div>
+              <div v-if="dayDataMap[cell.dateStr]" :class="['cal-cell-amount', moneyClass(dayDataMap[cell.dateStr].return_amount ?? 0)]">
+                {{ fmtMoney(dayDataMap[cell.dateStr].return_amount ?? 0) }}
+              </div>
+              <div v-if="dayDataMap[cell.dateStr]" :class="['cal-cell-rate', rateClass(dayDataMap[cell.dateStr].return_rate ?? 0)]">
+                {{ fmtRate(dayDataMap[cell.dateStr].return_rate ?? 0) }}
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Contribution Analysis (linked to selection) -->
+        <div class="cal-section-label">贡献分析 — {{ contribTitle }}</div>
+        <div ref="calContribRef" class="chart-box" style="height:300px"></div>
       </div>
 
       <div v-show="tab === 'contrib'" class="chart-card">
@@ -236,7 +313,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { portfolioApi, stockApi } from '../api'
@@ -248,8 +325,15 @@ const code = route.params.code
 const portfolio = ref({ name: '', code: '', holdings: [], latest_nav: null, latest_return_rate: null })
 const tab = ref('curve')
 const cr = ref('6m')
-const hy = ref(new Date().getFullYear())
-const years = ref(Array.from({ length: 4 }, (_, i) => new Date().getFullYear() - i))
+
+// Calendar state
+const calYear = ref(new Date().getFullYear())
+const calMonth = ref(new Date().getMonth() + 1)
+const selectedDay = ref(null)
+const selectedPeriod = ref({ type: 'month', start: '', end: '' })
+const monthMap = ref({})   // { 1: { return_amount, return_rate }, ... }
+const dayDataMap = ref({})  // { '2024-06-15': { return_amount, return_rate }, ... }
+const dayHeaders = ['一', '二', '三', '四', '五', '六', '日']
 
 const ranges = [
   { key: '1m', label: '1月' }, { key: '3m', label: '3月' }, { key: '6m', label: '6月' },
@@ -273,12 +357,14 @@ let searchTimer = null
 
 // Actions bar
 const returnStartDateStr = ref('')
+const editingStartDate = ref(false)
+const editStartDateVal = ref('')
 const refreshingData = ref(false)
 const refreshingNav = ref(false)
 
 // Charts
-const curveRef = ref(null), heatRef = ref(null), contribRef = ref(null)
-let cc = null, hc = null, oc = null
+const curveRef = ref(null), contribRef = ref(null), calContribRef = ref(null)
+let cc = null, oc = null, calCc = null
 
 async function refresh() {
   const { data } = await portfolioApi.detail(code)
@@ -303,21 +389,26 @@ watch(() => portfolio.value.return_start_date, (val) => {
 
 // ── Actions bar handlers ──
 
-async function handleReturnStartDateChange(e) {
-  const val = e.target.value || null
-  try {
-    await portfolioApi.setReturnStartDate(code, { return_start_date: val })
-    ElMessage.success(val ? `收益起始日已设为 ${val}` : '收益起始日已清除')
-    await refresh()
-  } catch { /* handled */ }
+function startEditStartDate() {
+  editStartDateVal.value = returnStartDateStr.value || ''
+  editingStartDate.value = true
 }
 
-async function handleClearReturnStartDate() {
+function cancelStartDate() {
+  editingStartDate.value = false
+  editStartDateVal.value = ''
+}
+
+async function confirmStartDate() {
+  const val = editStartDateVal.value || null
   try {
-    await portfolioApi.setReturnStartDate(code, { return_start_date: null })
-    returnStartDateStr.value = ''
-    ElMessage.success('收益起始日已清除')
+    await portfolioApi.setReturnStartDate(code, { return_start_date: val })
+    returnStartDateStr.value = val || ''
+    ElMessage.success(val ? `收益起始日已设为 ${val}` : '收益起始日已清除')
+    editingStartDate.value = false
     await refresh()
+    await nextTick()
+    if (tab.value === 'calendar') renderCalendar()
   } catch { /* handled */ }
 }
 
@@ -349,7 +440,7 @@ async function handleFullNavRecalc() {
     await refresh()
     await nextTick()
     if (tab.value === 'curve') renderCurve()
-    else if (tab.value === 'heatmap') renderHeatmap()
+    else if (tab.value === 'calendar') renderCalendar()
     else if (tab.value === 'contrib') renderContribution()
   } catch { /* handled */ }
   finally { refreshingNav.value = false }
@@ -363,7 +454,7 @@ async function handleIncrNavRecalc() {
     await refresh()
     await nextTick()
     if (tab.value === 'curve') renderCurve()
-    else if (tab.value === 'heatmap') renderHeatmap()
+    else if (tab.value === 'calendar') renderCalendar()
     else if (tab.value === 'contrib') renderContribution()
   } catch { /* handled */ }
   finally { refreshingNav.value = false }
@@ -426,6 +517,11 @@ function handleSearchEnter() {
 }
 
 // ── Holdings ──
+function moneyClass(v) { return v > 0 ? 'up' : v < 0 ? 'down' : 'zero' }
+function fmtMoney(v) { return v >= 0 ? '¥' + v.toFixed(2) : '-¥' + Math.abs(v).toFixed(2) }
+function rateClass(v) { return v > 0 ? 'up' : v < 0 ? 'down' : 'zero' }
+function fmtRate(v) { return (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%' }
+
 async function handleAdd() {
   try {
     await portfolioApi.addHolding(code, {
@@ -466,13 +562,23 @@ async function renderCurve() {
   if (!cc && curveRef.value) cc = echarts.init(curveRef.value)
   if (!cc) return
   cc.setOption({
-    tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#e5e7eb', textStyle: { color: '#1e2130', fontSize: 12 } },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff',
+      borderColor: '#e5e7eb',
+      textStyle: { color: '#1e2130', fontSize: 12 },
+      formatter: (params) => {
+        const p = params[0]
+        if (p.value == null) return `${p.axisValue}<br/>收益率: --`
+        return `${p.axisValue}<br/>收益率: <b>${p.value.toFixed(2)}%</b>`
+      },
+    },
     grid: { left: '8%', right: '5%', top: 10, bottom: 10 },
     xAxis: { type: 'category', data: res.data.map(d => d.date), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#9ca3af', fontSize: 10 } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#9ca3af', fontSize: 10, formatter: '{value}%' } },
     series: [{
       type: 'line', data: res.data.map(d => d.cum_return_rate != null ? +(d.cum_return_rate * 100).toFixed(2) : null),
-      smooth: true, symbol: 'none',
+      smooth: false, symbol: 'none',
       areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(59,130,246,0.15)' }, { offset: 1, color: 'rgba(59,130,246,0)' }]) },
       lineStyle: { color: '#3b82f6', width: 2 },
       markLine: { data: [{ yAxis: 0 }], lineStyle: { color: '#d1d5db', type: 'dashed' }, symbol: 'none' },
@@ -480,17 +586,144 @@ async function renderCurve() {
   }, true)
 }
 
-async function renderHeatmap() {
-  const { data: res } = await portfolioApi.dailyReturns(code, hy.value)
-  const data = res.data.map(d => [d.date, d.return_rate != null ? +(d.return_rate * 100).toFixed(2) : 0])
-  if (!hc && heatRef.value) hc = echarts.init(heatRef.value)
-  if (!hc) return
-  hc.setOption({
-    tooltip: { backgroundColor: '#fff', borderColor: '#e5e7eb', textStyle: { color: '#1e2130' }, formatter: p => `${p.data[0]}<br/>收益率: ${p.data[1]}%` },
-    visualMap: { min: -10, max: 10, inRange: { color: ['#1aad56', '#f0faf5', '#fef2f0', '#e15241'] }, show: false },
-    calendar: { range: String(hy.value), cellSize: ['auto', 18], dayLabel: { nameMap: 'ZH', color: '#9ca3af' }, monthLabel: { nameMap: 'ZH', color: '#9ca3af' }, itemStyle: { borderColor: '#fff', borderWidth: 2 } },
-    series: [{ type: 'heatmap', coordinateSystem: 'calendar', data }],
-  }, true)
+// ── Calendar ──
+
+function getReturnStartDate() {
+  return portfolio.value.return_start_date || null
+}
+
+function isMonthEnabled(m) {
+  const rsd = getReturnStartDate()
+  if (!rsd) return true
+  // Month is enabled if any day in the month could be >= return_start_date
+  // Simple check: month is >= return_start_date month in the same year, or year > return_start_date year
+  const rsdDate = new Date(rsd + 'T00:00:00')
+  const monthStart = new Date(calYear.value, m - 1, 1)
+  // Get last day of month
+  const monthEnd = new Date(calYear.value, m, 0)
+  return monthEnd >= rsdDate
+}
+
+function isDayEnabled(dateStr) {
+  const rsd = getReturnStartDate()
+  if (!rsd) return true
+  return dateStr >= rsd
+}
+
+function selectMonth(m) {
+  if (!isMonthEnabled(m)) return
+  calMonth.value = m
+  selectedDay.value = null
+  const startStr = `${calYear.value}-${String(m).padStart(2, '0')}-01`
+  const lastDay = new Date(calYear.value, m, 0).getDate()
+  const endStr = `${calYear.value}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+  selectedPeriod.value = { type: 'month', start: startStr, end: endStr }
+  fetchDailyData()
+  fetchContribForPeriod(startStr, endStr)
+}
+
+function selectDay(day, dateStr) {
+  if (!isDayEnabled(dateStr)) return
+  selectedDay.value = day
+  selectedPeriod.value = { type: 'day', start: dateStr, end: dateStr }
+  fetchContribForPeriod(dateStr, dateStr)
+}
+
+const dayCells = computed(() => {
+  const year = calYear.value
+  const month = calMonth.value
+  const firstDay = new Date(year, month - 1, 1)
+  const lastDate = new Date(year, month, 0).getDate()
+  // getDay() returns 0=Sun, 1=Mon, ... 6=Sat
+  // We want Mon=0, Tue=1, ..., Sun=6
+  let startDow = firstDay.getDay() - 1
+  if (startDow < 0) startDow = 6
+
+  const cells = []
+  // Padding cells before first day
+  for (let i = 0; i < startDow; i++) {
+    cells.push({ day: null, dateStr: '' })
+  }
+  // Day cells
+  for (let d = 1; d <= lastDate; d++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    cells.push({ day: d, dateStr })
+  }
+  return cells
+})
+
+const contribTitle = computed(() => {
+  if (selectedPeriod.value.type === 'day') {
+    return `${selectedPeriod.value.start}`
+  }
+  return `${calYear.value}年${calMonth.value}月`
+})
+
+async function fetchMonthlyData() {
+  try {
+    const { data: res } = await portfolioApi.monthlyReturns(code, calYear.value)
+    const map = {}
+    res.data.forEach(item => { map[item.month] = item })
+    monthMap.value = map
+  } catch { monthMap.value = {} }
+}
+
+async function fetchDailyData() {
+  try {
+    const { data: res } = await portfolioApi.dailyReturns(code, calYear.value, calMonth.value)
+    const map = {}
+    res.data.forEach(item => { map[item.date] = item })
+    dayDataMap.value = map
+  } catch { dayDataMap.value = {} }
+}
+
+async function fetchContribForPeriod(start, end) {
+  try {
+    const { data: res } = await portfolioApi.contributions(code, start, end)
+    if (!calCc && calContribRef.value) calCc = echarts.init(calContribRef.value)
+    if (!calCc) return
+    const vals = res.data.map(d => d.return_amount ?? 0)
+    calCc.setOption({
+      tooltip: {
+        trigger: 'axis', axisPointer: { type: 'shadow' },
+        backgroundColor: '#fff', borderColor: '#e5e7eb',
+        textStyle: { color: '#1e2130' },
+        formatter: (params) => {
+          const p = params[0]
+          const item = res.data[p.dataIndex]
+          if (!item) return p.name
+          const amount = item.return_amount != null ? '¥' + item.return_amount.toFixed(2) : '--'
+          const rate = item.return_rate != null ? ((item.return_rate * 100).toFixed(2) + '%') : '--'
+          return `<b>${item.stock_name}</b> (${item.stock_code})<br/>收益: ${amount}<br/>收益率: ${rate}`
+        },
+      },
+      grid: { left: '5%', right: '10%', top: 10, bottom: 10 },
+      xAxis: { type: 'value', splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#9ca3af', formatter: '¥{value}' } },
+      yAxis: { type: 'category', data: res.data.map(d => d.stock_name), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#1e2130', fontWeight: 500 } },
+      series: [{
+        type: 'bar', data: vals.map((v, i) => ({ value: v, itemStyle: { color: v >= 0 ? '#e15241' : '#1aad56', borderRadius: [0, 4, 4, 0] } })),
+        label: { show: true, position: 'right', color: '#6b7280', formatter: p => '¥' + Math.abs(p.value).toFixed(0) },
+      }],
+    }, true)
+  } catch { /* handled */ }
+}
+
+async function renderCalendar() {
+  await fetchMonthlyData()
+  // Set default selected month if none or not enabled
+  if (!isMonthEnabled(calMonth.value)) {
+    // Find first enabled month
+    for (let m = 1; m <= 12; m++) {
+      if (isMonthEnabled(m)) { calMonth.value = m; break }
+    }
+  }
+  selectedDay.value = null
+  const startStr = `${calYear.value}-${String(calMonth.value).padStart(2, '0')}-01`
+  const lastDay = new Date(calYear.value, calMonth.value, 0).getDate()
+  const endStr = `${calYear.value}-${String(calMonth.value).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+  selectedPeriod.value = { type: 'month', start: startStr, end: endStr }
+  await fetchDailyData()
+  await fetchContribForPeriod(startStr, endStr)
 }
 
 async function renderContribution() {
@@ -511,9 +744,9 @@ async function renderContribution() {
 }
 
 onMounted(async () => { await refresh(); await nextTick(); renderCurve() })
-const hr = () => { cc?.resize(); hc?.resize(); oc?.resize() }
+const hr = () => { cc?.resize(); oc?.resize(); calCc?.resize() }
 window.addEventListener('resize', hr)
-onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); hc?.dispose(); oc?.dispose() })
+onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); oc?.dispose(); calCc?.dispose() })
 </script>
 
 <style scoped>
@@ -543,7 +776,7 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); hc?
 }
 .ht-header, .ht-row {
   display: grid;
-  grid-template-columns: 100px 1fr 100px 120px 200px;
+  grid-template-columns: 90px 1fr 80px 100px 90px 110px 90px 180px;
   align-items: center; padding: var(--space-3) var(--space-5); gap: var(--space-3);
 }
 .ht-header { font-size: var(--text-xs); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; background: var(--color-bg); border-bottom: 1px solid var(--color-border); }
@@ -553,6 +786,11 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); hc?
 
 .code-text { font-family: var(--font-mono); font-weight: 600; }
 .unset { color: var(--color-text-muted); font-style: italic; }
+
+/* Holdings return colors */
+.col-ra .up, .col-rr .up { color: var(--color-up); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
+.col-ra .down, .col-rr .down { color: var(--color-down); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
+.col-ra .zero, .col-rr .zero { color: var(--color-text-muted); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
 
 .btn-primary-sm {
   display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 var(--space-4);
@@ -705,4 +943,85 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); hc?
 
 .spinning { animation: spin 0.8s linear infinite; }
 @keyframes spin { 100% { transform: rotate(360deg); } }
+
+/* ── Date display (read-only) ── */
+.date-display {
+  font-size: var(--text-sm); font-weight: 500;
+  color: var(--color-text-primary); padding: 2px 4px;
+}
+.date-display.muted { color: var(--color-text-muted); font-style: italic; }
+.action-btn-sm.confirm { color: var(--color-primary); border-color: var(--color-primary); }
+.action-btn-sm.confirm:hover { background: var(--color-primary-light); }
+
+/* ── Calendar ── */
+.cal-year-nav {
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--space-4); margin-bottom: var(--space-4);
+}
+.cal-nav-btn {
+  width: 32px; height: 32px; border: 1px solid var(--color-border);
+  border-radius: 50%; background: transparent; cursor: pointer;
+  font-size: 16px; color: var(--color-text-secondary);
+  display: flex; align-items: center; justify-content: center;
+  font-family: inherit; transition: all var(--transition-fast);
+}
+.cal-nav-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.cal-year-label { font-size: var(--text-lg); font-weight: 700; min-width: 80px; text-align: center; }
+
+.cal-section-label {
+  font-size: var(--text-sm); font-weight: 600; color: var(--color-text-secondary);
+  margin-bottom: var(--space-2); margin-top: var(--space-4);
+  padding-bottom: var(--space-1); border-bottom: 1px solid var(--color-divider);
+}
+
+/* Yearly month grid */
+.cal-month-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+.cal-month-cell {
+  background: var(--color-bg); border-radius: var(--radius-md);
+  padding: var(--space-3); text-align: center; cursor: pointer;
+  border: 2px solid transparent; transition: all var(--transition-fast);
+}
+.cal-month-cell:hover:not(.disabled) { border-color: var(--color-border); }
+.cal-month-cell.active { border-color: var(--color-primary); background: var(--color-primary-light); }
+.cal-month-cell.disabled { opacity: 0.35; cursor: not-allowed; }
+.cal-cell-month { font-size: var(--text-sm); font-weight: 700; margin-bottom: 4px; }
+.cal-cell-amount { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+.cal-cell-amount.up { color: var(--color-up); }
+.cal-cell-amount.down { color: var(--color-down); }
+.cal-cell-amount.zero { color: var(--color-text-muted); }
+.cal-cell-rate { font-family: var(--font-mono); font-size: 10px; font-weight: 500; }
+.cal-cell-rate.up { color: var(--color-up); }
+.cal-cell-rate.down { color: var(--color-down); }
+.cal-cell-rate.zero { color: var(--color-text-muted); }
+.cal-cell-no-data { font-size: 10px; color: var(--color-text-muted); }
+
+/* Monthly day grid */
+.cal-day-header {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 2px; margin-bottom: 4px;
+}
+.cal-dh-cell {
+  text-align: center; font-size: var(--text-xs);
+  color: var(--color-text-secondary); font-weight: 500; padding: 4px 0;
+}
+.cal-day-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-day-cell {
+  background: var(--color-bg); border-radius: var(--radius-sm);
+  padding: 4px; text-align: center; cursor: pointer; min-height: 52px;
+  border: 1px solid transparent; transition: all var(--transition-fast);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.cal-day-cell:hover:not(.disabled):not(.empty) { border-color: var(--color-border); }
+.cal-day-cell.active { border-color: var(--color-primary); background: var(--color-primary-light); }
+.cal-day-cell.disabled { opacity: 0.35; cursor: not-allowed; }
+.cal-day-cell.empty { background: transparent; cursor: default; }
+.cal-cell-day { font-size: var(--text-xs); font-weight: 600; line-height: 1.2; }
+.cal-day-cell .cal-cell-amount { font-size: 10px; }
+.cal-day-cell .cal-cell-rate { font-size: 9px; }
 </style>
