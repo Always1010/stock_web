@@ -1,7 +1,15 @@
 <template>
   <div>
-    <h1 class="page-title">市场行情</h1>
-    <p class="page-subtitle">数据更新于交易日 15:05</p>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">市场行情</h1>
+        <p class="page-subtitle">数据更新于交易日 15:05</p>
+      </div>
+      <button class="refresh-btn" :disabled="refreshing" @click="refreshAll">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: refreshing }"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        {{ refreshing ? '更新中...' : '更新数据' }}
+      </button>
+    </div>
 
     <!-- Index Cards -->
     <div class="index-grid">
@@ -93,7 +101,8 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import * as echarts from 'echarts'
-import api from '../api'
+import api, { marketApi } from '../api'
+import { ElMessage } from 'element-plus'
 
 const indices = ref([])
 const breadth = ref([])
@@ -103,6 +112,7 @@ const sectorDate = ref('')
 const turnover = ref([])
 const showTurnoverChart = ref(false)
 const turnoverChartRef = ref(null)
+const refreshing = ref(false)
 let turnoverChart = null
 
 const currentTurnover = computed(() => turnover.value.length ? turnover.value[turnover.value.length - 1] : null)
@@ -116,6 +126,19 @@ const filteredBreadth = computed(() => {
   const all = breadth.value.filter(b => b.board === 'ALL')
   return all.length ? all : breadth.value
 })
+
+async function refreshAll() {
+  refreshing.value = true
+  try {
+    const { data: res } = await marketApi.refreshIndices()
+    ElMessage.success(res.message || '市场数据已更新')
+    await loadData()
+  } catch {
+    // error already shown by interceptor
+  } finally {
+    refreshing.value = false
+  }
+}
 
 function formatAmount(val) {
   if (!val) return '--'
@@ -148,7 +171,7 @@ async function renderTurnoverChart() {
 
 watch(showTurnoverChart, async (v) => { if (v) { await nextTick(); renderTurnoverChart() } })
 
-onMounted(async () => {
+async function loadData() {
   try {
     const [ir, br, sr, tr] = await Promise.all([
       api.get('/market/indices'),
@@ -163,10 +186,26 @@ onMounted(async () => {
     sectorDate.value = sr.data.trade_date
     turnover.value = tr.data.data
   } catch { /* ignore */ }
-})
+}
+
+onMounted(loadData)
 </script>
 
 <style scoped>
+/* ── Page header ── */
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-6); }
+.refresh-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 32px; padding: 0 var(--space-3); border: 1px solid var(--color-border);
+  background: transparent; border-radius: var(--radius-sm); font-size: var(--text-xs);
+  font-weight: 500; cursor: pointer; font-family: inherit; color: var(--color-text-secondary);
+  transition: all var(--transition-fast); white-space: nowrap;
+}
+.refresh-btn:hover:not(:disabled) { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+.refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.spinning { animation: spin 0.8s linear infinite; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
 /* ── Index Cards ── */
 .index-grid {
   display: grid;
