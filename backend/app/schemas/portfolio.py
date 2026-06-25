@@ -16,6 +16,7 @@ class PortfolioSummary(BaseModel):
     code: str
     name: str
     created_at: datetime
+    return_start_date: date | None = None
     latest_nav: float | None = None
     latest_return_rate: float | None = None
 
@@ -39,6 +40,7 @@ class PortfolioDetail(BaseModel):
     name: str
     created_at: datetime
     updated_at: datetime
+    return_start_date: date | None = None
     holdings: list[HoldingResponse]
     latest_nav: float | None = None
     latest_return_rate: float | None = None
@@ -105,3 +107,28 @@ class ContributionResponse(BaseModel):
     start_date: str
     end_date: str
     data: list[ContributionItem]
+
+
+# ── Return Start Date ───────────────────────────────────────────
+
+class SetReturnStartDateRequest(BaseModel):
+    return_start_date: date | None = None
+
+
+# ── Portfolio Refresh ───────────────────────────────────────────
+
+class PortfolioRefreshResponse(BaseModel):
+    portfolio_code: str
+    total_stocks: int
+    processed: int
+    total_affected: int
+    errors: int
+    message: str = ""
+
+
+class PortfolioNavRecalcResponse(BaseModel):
+    portfolio_code: str
+    start_date: str | None = None
+    end_date: str
+    records_created: int
+    message: str = ""
