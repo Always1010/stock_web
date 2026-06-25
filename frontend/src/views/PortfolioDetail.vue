@@ -100,8 +100,8 @@
 
       <div class="holdings-table">
         <div class="ht-header">
-          <span class="col-c">代码</span>
           <span class="col-n">名称</span>
+          <span class="col-c">代码</span>
           <span class="col-s">持仓</span>
           <span class="col-p">成本价</span>
           <span class="col-cp">现价</span>
@@ -111,8 +111,8 @@
           <span class="col-a"></span>
         </div>
         <div v-for="h in portfolio.holdings" :key="h.id" class="ht-row">
-          <span class="col-c"><span class="code-text">{{ h.stock_code }}</span></span>
           <span class="col-n">{{ h.stock_name }}</span>
+          <span class="col-c"><span class="code-text">{{ h.stock_code }}</span></span>
           <span class="col-s">{{ h.shares }} 股</span>
           <span class="col-p">
             <span v-if="h.cost_price != null">¥{{ h.cost_price.toFixed(3) }}</span>
@@ -172,8 +172,8 @@
         <div class="cal-month-grid">
           <div
             v-for="m in 12" :key="'m'+m"
-            :class="['cal-month-cell', {
-              active: calMonth === m,
+            :class="['cal-month-cell', monthCellBgClass(m), {
+              active: selectedMonth === m,
               disabled: !isMonthEnabled(m),
             }]"
             @click="selectMonth(m)"
@@ -199,7 +199,7 @@
         <div class="cal-day-grid">
           <div
             v-for="(cell, idx) in dayCells" :key="'d'+idx"
-            :class="['cal-day-cell', {
+            :class="['cal-day-cell', dayCellBgClass(cell.dateStr), {
               active: cell.day != null && selectedDay === cell.day,
               disabled: cell.day != null && !isDayEnabled(cell.dateStr),
               empty: cell.day == null,
@@ -338,11 +338,12 @@ const cr = ref('6m')
 // Calendar state
 const calYear = ref(new Date().getFullYear())
 const calMonth = ref(new Date().getMonth() + 1)
+const selectedMonth = ref(null)   // null = show full year contributions
 const selectedDay = ref(null)
-const selectedPeriod = ref({ type: 'month', start: '', end: '' })
+const selectedPeriod = ref({ type: 'year', start: '', end: '' })
 const monthMap = ref({})   // { 1: { return_amount, return_rate }, ... }
 const dayDataMap = ref({})  // { '2024-06-15': { return_amount, return_rate }, ... }
-const dayHeaders = ['一', '二', '三', '四', '五', '六', '日']
+const dayHeaders = ['日', '一', '二', '三', '四', '五', '六']
 
 const ranges = [
   { key: '1m', label: '1月' }, { key: '3m', label: '3月' }, { key: '6m', label: '6月' },
@@ -597,30 +598,19 @@ async function renderCurve() {
 
 // ── Calendar ──
 
-function getReturnStartDate() {
-  return portfolio.value.return_start_date || null
-}
-
-function isMonthEnabled(m) {
-  const rsd = getReturnStartDate()
-  if (!rsd) return true
-  // Month is enabled if any day in the month could be >= return_start_date
-  // Simple check: month is >= return_start_date month in the same year, or year > return_start_date year
-  const rsdDate = new Date(rsd + 'T00:00:00')
-  const monthStart = new Date(calYear.value, m - 1, 1)
-  // Get last day of month
-  const monthEnd = new Date(calYear.value, m, 0)
-  return monthEnd >= rsdDate
-}
-
-function isDayEnabled(dateStr) {
-  const rsd = getReturnStartDate()
-  if (!rsd) return true
-  return dateStr >= rsd
-}
-
 function selectMonth(m) {
   if (!isMonthEnabled(m)) return
+  if (selectedMonth.value === m) {
+    // Deselect: show full year contributions
+    selectedMonth.value = null
+    selectedDay.value = null
+    const startStr = `${calYear.value}-01-01`
+    const endStr = `${calYear.value}-12-31`
+    selectedPeriod.value = { type: 'year', start: startStr, end: endStr }
+    fetchContribForPeriod(startStr, endStr)
+    return
+  }
+  selectedMonth.value = m
   calMonth.value = m
   selectedDay.value = null
   const startStr = `${calYear.value}-${String(m).padStart(2, '0')}-01`
@@ -643,17 +633,13 @@ const dayCells = computed(() => {
   const month = calMonth.value
   const firstDay = new Date(year, month - 1, 1)
   const lastDate = new Date(year, month, 0).getDate()
-  // getDay() returns 0=Sun, 1=Mon, ... 6=Sat
-  // We want Mon=0, Tue=1, ..., Sun=6
-  let startDow = firstDay.getDay() - 1
-  if (startDow < 0) startDow = 6
+  // Sunday-first: getDay() returns 0=Sun -> 0 padding cells
+  const startDow = firstDay.getDay()
 
   const cells = []
-  // Padding cells before first day
   for (let i = 0; i < startDow; i++) {
     cells.push({ day: null, dateStr: '' })
   }
-  // Day cells
   for (let d = 1; d <= lastDate; d++) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     cells.push({ day: d, dateStr })
@@ -662,11 +648,21 @@ const dayCells = computed(() => {
 })
 
 const contribTitle = computed(() => {
-  if (selectedPeriod.value.type === 'day') {
-    return `${selectedPeriod.value.start}`
-  }
-  return `${calYear.value}年${calMonth.value}月`
+  if (selectedPeriod.value.type === 'day') return selectedPeriod.value.start
+  if (selectedPeriod.value.type === 'month') return `${calYear.value}年${selectedMonth.value}月`
+  return `${calYear.value}年全年`
 })
+
+function monthCellBgClass(m) {
+  const d = monthMap.value[m]
+  if (!d || d.return_amount == null) return ''
+  return d.return_amount > 0 ? 'bg-up' : d.return_amount < 0 ? 'bg-down' : ''
+}
+function dayCellBgClass(dateStr) {
+  const d = dayDataMap.value[dateStr]
+  if (!d || d.return_amount == null) return ''
+  return d.return_amount > 0 ? 'bg-up' : d.return_amount < 0 ? 'bg-down' : ''
+}
 
 async function fetchMonthlyData() {
   try {
@@ -719,20 +715,38 @@ async function fetchContribForPeriod(start, end) {
 
 async function renderCalendar() {
   await fetchMonthlyData()
-  // Set default selected month if none or not enabled
+  // Set default visible month if current one is not enabled
   if (!isMonthEnabled(calMonth.value)) {
-    // Find first enabled month
     for (let m = 1; m <= 12; m++) {
       if (isMonthEnabled(m)) { calMonth.value = m; break }
     }
   }
+  // Default: full year contribution (no month selected)
+  selectedMonth.value = null
   selectedDay.value = null
-  const startStr = `${calYear.value}-${String(calMonth.value).padStart(2, '0')}-01`
-  const lastDay = new Date(calYear.value, calMonth.value, 0).getDate()
-  const endStr = `${calYear.value}-${String(calMonth.value).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-  selectedPeriod.value = { type: 'month', start: startStr, end: endStr }
+  const yearStart = `${calYear.value}-01-01`
+  const yearEnd = `${calYear.value}-12-31`
+  selectedPeriod.value = { type: 'year', start: yearStart, end: yearEnd }
   await fetchDailyData()
-  await fetchContribForPeriod(startStr, endStr)
+  await fetchContribForPeriod(yearStart, yearEnd)
+}
+
+function getReturnStartDate() {
+  return portfolio.value.return_start_date || null
+}
+
+function isMonthEnabled(m) {
+  const rsd = getReturnStartDate()
+  if (!rsd) return true
+  const monthEnd = new Date(calYear.value, m, 0)
+  const rsdDate = new Date(rsd + 'T00:00:00')
+  return monthEnd >= rsdDate
+}
+
+function isDayEnabled(dateStr) {
+  const rsd = getReturnStartDate()
+  if (!rsd) return true
+  return dateStr >= rsd
 }
 
 async function renderContribution() {
@@ -785,9 +799,10 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); oc?
 }
 .ht-header, .ht-row {
   display: grid;
-  grid-template-columns: 90px 1fr 70px 90px 85px 85px 100px 90px 160px;
+  grid-template-columns: 1fr 80px 70px 90px 85px 85px 100px 90px 160px;
   align-items: center; padding: var(--space-3) var(--space-5); gap: var(--space-3);
 }
+.ht-header span, .ht-row span { white-space: nowrap; }
 .ht-header { font-size: var(--text-xs); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; background: var(--color-bg); border-bottom: 1px solid var(--color-border); }
 .ht-row { border-bottom: 1px solid var(--color-divider); font-size: var(--text-base); }
 .ht-row:last-child { border-bottom: none; }
@@ -996,6 +1011,10 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); oc?
 .cal-month-cell:hover:not(.disabled) { border-color: var(--color-border); }
 .cal-month-cell.active { border-color: var(--color-primary); background: var(--color-primary-light); }
 .cal-month-cell.disabled { opacity: 0.35; cursor: not-allowed; }
+.cal-month-cell.bg-up { background: #fef0ef; }
+.cal-month-cell.bg-down { background: #f0faf5; }
+.cal-month-cell.active.bg-up { background: #fde8e5; }
+.cal-month-cell.active.bg-down { background: #e6f7ef; }
 .cal-cell-month { font-size: var(--text-sm); font-weight: 700; margin-bottom: 4px; }
 .cal-cell-amount { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
 .cal-cell-amount.up { color: var(--color-up); }
@@ -1030,6 +1049,10 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); oc?
 .cal-day-cell.active { border-color: var(--color-primary); background: var(--color-primary-light); }
 .cal-day-cell.disabled { opacity: 0.35; cursor: not-allowed; }
 .cal-day-cell.empty { background: transparent; cursor: default; }
+.cal-day-cell.bg-up { background: #fef0ef; }
+.cal-day-cell.bg-down { background: #f0faf5; }
+.cal-day-cell.active.bg-up { background: #fde8e5; }
+.cal-day-cell.active.bg-down { background: #e6f7ef; }
 .cal-cell-day { font-size: var(--text-xs); font-weight: 600; line-height: 1.2; }
 .cal-day-cell .cal-cell-amount { font-size: 10px; }
 .cal-day-cell .cal-cell-rate { font-size: 9px; }
