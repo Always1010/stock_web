@@ -18,6 +18,7 @@ class PortfolioSummary(BaseModel):
     created_at: datetime
     return_start_date: date | None = None
     latest_nav: float | None = None
+    latest_total_cost: float | None = None  # 原始数据，供前端计算累计收益
     latest_cumulative_return: float | None = None
     latest_return_rate: float | None = None
 
@@ -33,6 +34,7 @@ class HoldingResponse(BaseModel):
     cost_price_set_at: datetime | None = None
     is_cost_locked: bool
     current_price: float | None = None
+    prev_close: float | None = None  # 前一交易日收盘价（原始数据，供前端计算当日收益率）
     daily_return_rate: float | None = None
     return_amount: float | None = None
     return_rate: float | None = None
@@ -48,6 +50,7 @@ class PortfolioDetail(BaseModel):
     return_start_date: date | None = None
     holdings: list[HoldingResponse]
     latest_nav: float | None = None
+    latest_total_cost: float | None = None  # 原始数据，供前端计算累计收益
     latest_cumulative_return: float | None = None
     latest_return_rate: float | None = None
 
