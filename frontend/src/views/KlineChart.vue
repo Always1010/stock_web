@@ -44,9 +44,14 @@
         <span class="detail-value" v-if="amplitude != null">{{ amplitude.toFixed(2) }}%</span>
         <span class="detail-value" v-else>--</span>
       </div>
-      <button class="hero-star" @click="addWatchlist">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        加自选
+      <button
+        class="hero-star"
+        :class="{ watched: isWatched }"
+        @click="toggleWatchlist"
+        :title="isWatched ? '取消自选' : '加自选'"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" :fill="isWatched ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        {{ isWatched ? '已自选' : '加自选' }}
       </button>
       <button class="hero-refresh" :disabled="refreshing" @click="refreshData">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: refreshing }"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -79,6 +84,8 @@ const chartRef = ref(null)
 let chart = null
 const klineData = ref([])
 const refreshing = ref(false)
+const watchlistCodes = ref(new Set())
+const isWatched = computed(() => watchlistCodes.value.has(code.value))
 
 const ranges = [
   { key: '1m', label: '1月' }, { key: '3m', label: '3月' }, { key: '6m', label: '6月' },
@@ -185,7 +192,21 @@ async function fetchData() {
   }, true)
 }
 
-function addWatchlist() { watchlistApi.add(code.value).then(() => ElMessage.success('已添加到自选')) }
+async function toggleWatchlist() {
+  if (watchlistCodes.value.has(code.value)) {
+    try {
+      await watchlistApi.remove(code.value)
+      watchlistCodes.value.delete(code.value)
+      ElMessage.success('已取消自选')
+    } catch { /* handled */ }
+  } else {
+    try {
+      await watchlistApi.add(code.value)
+      watchlistCodes.value.add(code.value)
+      ElMessage.success('已添加到自选')
+    } catch { /* handled */ }
+  }
+}
 
 async function refreshData() {
   refreshing.value = true
@@ -208,7 +229,13 @@ watch(() => route.params.code, (newCode) => {
   }
 })
 
-onMounted(fetchData)
+onMounted(async () => {
+  fetchData()
+  try {
+    const { data } = await watchlistApi.list()
+    watchlistCodes.value = new Set(data.items.map(w => w.code))
+  } catch { /* ignore */ }
+})
 const hr = () => chart?.resize()
 window.addEventListener('resize', hr)
 onUnmounted(() => { window.removeEventListener('resize', hr); chart?.dispose() })
@@ -252,6 +279,8 @@ onUnmounted(() => { window.removeEventListener('resize', hr); chart?.dispose() }
   transition: all var(--transition-fast);
 }
 .hero-star:hover { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+.hero-star.watched { color: #f59e0b; border-color: #f59e0b; }
+.hero-star.watched:hover { color: #d97706; border-color: #d97706; background: #fffbeb; }
 .hero-refresh {
   display: inline-flex; align-items: center; gap: 5px;
   height: 32px; padding: 0 var(--space-3); border: 1px solid var(--color-border);
