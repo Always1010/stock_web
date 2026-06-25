@@ -70,6 +70,7 @@ export const portfolioApi = {
 
 // ── Market ────────────────────────────────────────
 export const marketApi = {
+  refreshIndices: () => api.post('/market/refresh'),
   refreshIndex: (code) => api.post(`/market/indices/${code}/refresh`),
 }
 

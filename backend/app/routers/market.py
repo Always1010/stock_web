@@ -22,6 +22,40 @@ router = APIRouter(prefix="/market", tags=["Market"])
 BOARD_LABELS = {"SH": "沪市主板", "SZ": "深市主板", "BJ": "北交所"}
 
 
+@router.post("/refresh")
+def refresh_market(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-crawl market indices, breadth, sectors, and turnover data."""
+    from app.services.crawler import (
+        crawl_market_breadth,
+        crawl_market_indices,
+        crawl_sectors,
+        crawl_market_turnover,
+    )
+
+    results = {}
+    try:
+        results["indices"] = crawl_market_indices(db)
+    except Exception as e:
+        results["indices"] = {"error": str(e)}
+    try:
+        results["breadth"] = crawl_market_breadth(db)
+    except Exception as e:
+        results["breadth"] = {"error": str(e)}
+    try:
+        results["sectors"] = crawl_sectors(db)
+    except Exception as e:
+        results["sectors"] = {"error": str(e)}
+    try:
+        results["turnover"] = crawl_market_turnover(db)
+    except Exception as e:
+        results["turnover"] = {"error": str(e)}
+
+    return {"message": "Market data refreshed", "results": results}
+
+
 @router.get("/indices", response_model=IndicesResponse)
 def get_indices(
     db: Session = Depends(get_db),
