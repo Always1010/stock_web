@@ -151,6 +151,31 @@ def get_sectors(
     return SectorResponse(data=data, trade_date=trade_date.isoformat())
 
 
+@router.post("/indices/{code}/refresh")
+def refresh_index_kline(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-crawl K-line data for a market index, overwriting existing records."""
+    from app.services.crawler import crawl_index_kline
+
+    cfg = {c["code"]: c for c in [
+        {"code": "sh000001", "name": "上证指数"},
+        {"code": "sz399001", "name": "深证成指"},
+        {"code": "sz399006", "name": "创业板指"},
+        {"code": "sh000688", "name": "科创50"},
+        {"code": "sh000300", "name": "沪深300"},
+    ]}
+    info = cfg.get(code)
+    if not info:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown index: {code}")
+
+    affected = crawl_index_kline(code, info["name"], db, overwrite=True)
+    return {"code": code, "affected": affected, "message": f"Refreshed {affected} records for {code}"}
+
+
 @router.get("/indices/{code}/kline", response_model=None)
 def get_index_kline(
     code: str,

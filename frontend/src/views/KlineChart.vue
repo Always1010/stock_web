@@ -59,7 +59,7 @@
         <svg width="14" height="14" viewBox="0 0 24 24" :fill="isWatched ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
         {{ isWatched ? '已自选' : '加自选' }}
       </button>
-      <button v-if="!isIndex" class="hero-refresh" :disabled="refreshing" @click="refreshData">
+      <button class="hero-refresh" :disabled="refreshing" @click="refreshData">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: refreshing }"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         {{ refreshing ? '更新中...' : '更新数据' }}
       </button>
@@ -79,7 +79,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
-import api, { stockApi, watchlistApi } from '../api'
+import api, { stockApi, watchlistApi, marketApi } from '../api'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
@@ -221,7 +221,9 @@ async function toggleWatchlist() {
 async function refreshData() {
   refreshing.value = true
   try {
-    const { data: res } = await stockApi.refresh(code.value)
+    const { data: res } = isIndex.value
+      ? await marketApi.refreshIndex(code.value)
+      : await stockApi.refresh(code.value)
     ElMessage.success(res.message || `已刷新 ${res.affected} 条数据`)
     await fetchData()
   } catch {
