@@ -423,6 +423,7 @@ async function confirmStartDate() {
     ElMessage.success(val ? `收益起始日已设为 ${val}` : '收益起始日已清除')
     editingStartDate.value = false
     await refresh()
+    rawHoldings.value = []  // 清除 K 线缓存，下次日历会重新加载
     await nextTick()
     if (tab.value === 'calendar') renderCalendar()
   } catch { /* handled */ }
@@ -685,35 +686,36 @@ function dayCellBgClass(dateStr) {
 }
 
 /**
- * 从原始 K 线数据一次性算出 NAV 序列、日收益、月收益（全部前端计算）。
- * 替代 /nav + /daily-returns + /monthly-returns 三个 API 调用。
+ * 首次加载：一次性获取从 return_start_date 到今天的全部原始 K 线数据。
+ * 后续切换年份/月份不再访问后端，全部从 rawHoldings 缓存中前端计算。
  */
-async function loadCalendarData() {
+async function loadAllKlineData() {
   try {
-    const yearStart = `${calYear.value}-01-01`
-    const yearEnd = `${calYear.value}-12-31`
-    const { data: res } = await portfolioApi.holdingsKline(code, yearStart, yearEnd)
-
-    // 保存原始数据，供贡献分析等后续计算复用
+    const rsd = portfolio.value.return_start_date || '2020-01-01'
+    const today = new Date().toISOString().slice(0, 10)
+    const { data: res } = await portfolioApi.holdingsKline(code, rsd, today)
     rawHoldings.value = res.holdings
-
-    // 前端计算 NAV 序列
-    const navSeries = calcNavSeries(res.holdings)
-
-    // 前端计算月度收益
-    const monthly = calcMonthlyReturns(navSeries, calYear.value)
-    const mmap = {}
-    monthly.forEach(item => { mmap[item.month] = item })
-    monthMap.value = mmap
-
-    // 前端计算每日收益
-    const dailyMap = calcDailyReturns(navSeries)
-    dayDataMap.value = Object.fromEntries(dailyMap)
   } catch {
-    monthMap.value = {}
-    dayDataMap.value = {}
     rawHoldings.value = []
   }
+}
+
+/** 从缓存的 rawHoldings 计算当前年份的日历数据（纯前端，不访问后端） */
+function computeCalendarForYear() {
+  if (rawHoldings.value.length === 0) {
+    monthMap.value = {}
+    dayDataMap.value = {}
+    return
+  }
+  const navSeries = calcNavSeries(rawHoldings.value)
+
+  const monthly = calcMonthlyReturns(navSeries, calYear.value)
+  const mmap = {}
+  monthly.forEach(item => { mmap[item.month] = item })
+  monthMap.value = mmap
+
+  const dailyMap = calcDailyReturns(navSeries)
+  dayDataMap.value = Object.fromEntries(dailyMap)
 }
 
 /**
@@ -753,8 +755,9 @@ function fetchContribForPeriod(start, end) {
 }
 
 async function renderCalendar() {
-  // 前端计算：从原始 NAV 序列一次性算出日收益和月收益
-  await loadCalendarData()
+  // 首次加载全量 K 线数据（仅一次），后续切换年份纯前端计算
+  if (rawHoldings.value.length === 0) await loadAllKlineData()
+  computeCalendarForYear()
   if (!isMonthEnabled(calMonth.value)) {
     for (let m = 1; m <= 12; m++) {
       if (isMonthEnabled(m)) { calMonth.value = m; break }
