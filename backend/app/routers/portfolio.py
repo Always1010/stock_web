@@ -163,6 +163,19 @@ def get_portfolio(
         if h.cost_price is not None and current_price is not None and h.cost_price > 0:
             return_amount = (current_price - h.cost_price) * h.shares
             return_rate = (current_price / h.cost_price) - 1
+
+        # Compute per-stock daily change % (latest close vs previous close)
+        daily_return_rate = None
+        latest_two = (
+            db.query(DailyKline)
+            .filter(DailyKline.stock_id == h.stock_id)
+            .order_by(DailyKline.trade_date.desc())
+            .limit(2)
+            .all()
+        )
+        if len(latest_two) == 2 and latest_two[1].close > 0:
+            daily_return_rate = (latest_two[0].close - latest_two[1].close) / latest_two[1].close
+
         holdings.append(
             HoldingResponse(
                 id=h.id,
@@ -173,6 +186,7 @@ def get_portfolio(
                 cost_price_set_at=h.cost_price_set_at,
                 is_cost_locked=h.is_cost_locked,
                 current_price=current_price,
+                daily_return_rate=daily_return_rate,
                 return_amount=return_amount,
                 return_rate=return_rate,
             )

@@ -105,8 +105,9 @@
           <span class="col-s">持仓</span>
           <span class="col-p">成本价</span>
           <span class="col-cp">现价</span>
+          <span class="col-dr">当日收益率</span>
           <span class="col-ra">累计收益</span>
-          <span class="col-rr">收益率</span>
+          <span class="col-rr">累计收益率</span>
           <span class="col-a"></span>
         </div>
         <div v-for="h in portfolio.holdings" :key="h.id" class="ht-row">
@@ -119,6 +120,10 @@
           </span>
           <span class="col-cp">
             <span v-if="h.current_price != null">¥{{ h.current_price.toFixed(2) }}</span>
+            <span v-else class="unset">--</span>
+          </span>
+          <span class="col-dr">
+            <span v-if="h.daily_return_rate != null" :class="rateClass(h.daily_return_rate)">{{ fmtRate(h.daily_return_rate) }}</span>
             <span v-else class="unset">--</span>
           </span>
           <span class="col-ra">
@@ -174,12 +179,14 @@
             @click="selectMonth(m)"
           >
             <div class="cal-cell-month">{{ m }}月</div>
-            <div v-if="monthMap[m]" :class="['cal-cell-amount', moneyClass(monthMap[m].return_amount ?? 0)]">
-              {{ monthMap[m].return_amount != null ? fmtMoney(monthMap[m].return_amount) : '--' }}
-            </div>
-            <div v-if="monthMap[m]" :class="['cal-cell-rate', rateClass(monthMap[m].return_rate ?? 0)]">
-              {{ monthMap[m].return_rate != null ? fmtRate(monthMap[m].return_rate) : '--' }}
-            </div>
+            <template v-if="monthMap[m] && (monthMap[m].return_amount != null || monthMap[m].return_rate != null)">
+              <div :class="['cal-cell-amount', moneyClass(monthMap[m].return_amount ?? 0)]">
+                {{ monthMap[m].return_amount != null ? fmtMoney(monthMap[m].return_amount) : '--' }}
+              </div>
+              <div :class="['cal-cell-rate', rateClass(monthMap[m].return_rate ?? 0)]">
+                {{ monthMap[m].return_rate != null ? fmtRate(monthMap[m].return_rate) : '--' }}
+              </div>
+            </template>
             <div v-else class="cal-cell-no-data">无数据</div>
           </div>
         </div>
@@ -201,12 +208,14 @@
           >
             <template v-if="cell.day != null">
               <div class="cal-cell-day">{{ cell.day }}</div>
-              <div v-if="dayDataMap[cell.dateStr]" :class="['cal-cell-amount', moneyClass(dayDataMap[cell.dateStr].return_amount ?? 0)]">
-                {{ fmtMoney(dayDataMap[cell.dateStr].return_amount ?? 0) }}
-              </div>
-              <div v-if="dayDataMap[cell.dateStr]" :class="['cal-cell-rate', rateClass(dayDataMap[cell.dateStr].return_rate ?? 0)]">
-                {{ fmtRate(dayDataMap[cell.dateStr].return_rate ?? 0) }}
-              </div>
+              <template v-if="dayDataMap[cell.dateStr] && (dayDataMap[cell.dateStr].return_amount != null || dayDataMap[cell.dateStr].return_rate != null)">
+                <div v-if="dayDataMap[cell.dateStr].return_amount != null" :class="['cal-cell-amount', moneyClass(dayDataMap[cell.dateStr].return_amount)]">
+                  {{ fmtMoney(dayDataMap[cell.dateStr].return_amount) }}
+                </div>
+                <div v-if="dayDataMap[cell.dateStr].return_rate != null" :class="['cal-cell-rate', rateClass(dayDataMap[cell.dateStr].return_rate)]">
+                  {{ fmtRate(dayDataMap[cell.dateStr].return_rate) }}
+                </div>
+              </template>
             </template>
           </div>
         </div>
@@ -776,7 +785,7 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); oc?
 }
 .ht-header, .ht-row {
   display: grid;
-  grid-template-columns: 90px 1fr 80px 100px 90px 110px 90px 180px;
+  grid-template-columns: 90px 1fr 70px 90px 85px 85px 100px 90px 160px;
   align-items: center; padding: var(--space-3) var(--space-5); gap: var(--space-3);
 }
 .ht-header { font-size: var(--text-xs); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; background: var(--color-bg); border-bottom: 1px solid var(--color-border); }
@@ -788,9 +797,9 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); oc?
 .unset { color: var(--color-text-muted); font-style: italic; }
 
 /* Holdings return colors */
-.col-ra .up, .col-rr .up { color: var(--color-up); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
-.col-ra .down, .col-rr .down { color: var(--color-down); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
-.col-ra .zero, .col-rr .zero { color: var(--color-text-muted); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
+.col-ra .up, .col-rr .up, .col-dr .up { color: var(--color-up); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
+.col-ra .down, .col-rr .down, .col-dr .down { color: var(--color-down); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
+.col-ra .zero, .col-rr .zero, .col-dr .zero { color: var(--color-text-muted); font-weight: 600; font-family: var(--font-mono); font-size: var(--text-sm); }
 
 .btn-primary-sm {
   display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 var(--space-4);

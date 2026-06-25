@@ -33,6 +33,7 @@ class HoldingResponse(BaseModel):
     cost_price_set_at: datetime | None = None
     is_cost_locked: bool
     current_price: float | None = None
+    daily_return_rate: float | None = None
     return_amount: float | None = None
     return_rate: float | None = None
 
