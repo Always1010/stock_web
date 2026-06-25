@@ -329,7 +329,7 @@ import { portfolioApi, stockApi } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   calcReturnAmount, calcReturnRate, calcDailyReturnRate,
-  calcCumReturn, calcDailyReturns, calcMonthlyReturns,
+  calcCumReturn, calcNavSeries, calcDailyReturns, calcMonthlyReturns, calcContributions,
   fmtMoney, fmtRate, moneyClass, rateClass,
 } from '../utils/portfolioCalc'
 
@@ -346,8 +346,9 @@ const calMonth = ref(new Date().getMonth() + 1)
 const selectedMonth = ref(null)   // null = show full year contributions
 const selectedDay = ref(null)
 const selectedPeriod = ref({ type: 'year', start: '', end: '' })
-const monthMap = ref({})   // { 1: { return_amount, return_rate }, ... }
-const dayDataMap = ref({})  // { '2024-06-15': { return_amount, return_rate }, ... }
+const monthMap = ref({})
+const dayDataMap = ref({})
+const rawHoldings = ref([])  // 原始持仓K线数据，供前端计算 NAV/贡献
 const dayHeaders = ['日', '一', '二', '三', '四', '五', '六']
 
 const ranges = [
@@ -684,35 +685,48 @@ function dayCellBgClass(dateStr) {
 }
 
 /**
- * 从原始 NAV 序列计算日历数据（前端计算，替代 /monthly-returns + /daily-returns 两个 API 调用）
+ * 从原始 K 线数据一次性算出 NAV 序列、日收益、月收益（全部前端计算）。
+ * 替代 /nav + /daily-returns + /monthly-returns 三个 API 调用。
  */
 async function loadCalendarData() {
   try {
     const yearStart = `${calYear.value}-01-01`
     const yearEnd = `${calYear.value}-12-31`
-    const { data: res } = await portfolioApi.nav(code, yearStart, yearEnd)
+    const { data: res } = await portfolioApi.holdingsKline(code, yearStart, yearEnd)
+
+    // 保存原始数据，供贡献分析等后续计算复用
+    rawHoldings.value = res.holdings
+
+    // 前端计算 NAV 序列
+    const navSeries = calcNavSeries(res.holdings)
 
     // 前端计算月度收益
-    const monthly = calcMonthlyReturns(res.data, calYear.value)
+    const monthly = calcMonthlyReturns(navSeries, calYear.value)
     const mmap = {}
     monthly.forEach(item => { mmap[item.month] = item })
     monthMap.value = mmap
 
     // 前端计算每日收益
-    const dailyMap = calcDailyReturns(res.data)
+    const dailyMap = calcDailyReturns(navSeries)
     dayDataMap.value = Object.fromEntries(dailyMap)
   } catch {
     monthMap.value = {}
     dayDataMap.value = {}
+    rawHoldings.value = []
   }
 }
 
-async function fetchContribForPeriod(start, end) {
+/**
+ * 前端计算贡献分析（不再调用 /contributions 端点）。
+ * 使用 loadCalendarData 中缓存的 rawHoldings 原始 K 线数据。
+ */
+function fetchContribForPeriod(start, end) {
   try {
-    const { data: res } = await portfolioApi.contributions(code, start, end)
+    if (rawHoldings.value.length === 0) return
+    const items = calcContributions(rawHoldings.value, start, end)
     if (!calCc && calContribRef.value) calCc = echarts.init(calContribRef.value)
     if (!calCc) return
-    const vals = res.data.map(d => d.return_amount ?? 0)
+    const vals = items.map(d => d.return_amount ?? 0)
     calCc.setOption({
       tooltip: {
         trigger: 'axis', axisPointer: { type: 'shadow' },
@@ -720,7 +734,7 @@ async function fetchContribForPeriod(start, end) {
         textStyle: { color: '#1e2130' },
         formatter: (params) => {
           const p = params[0]
-          const item = res.data[p.dataIndex]
+          const item = items[p.dataIndex]
           if (!item) return p.name
           const amount = item.return_amount != null ? '¥' + item.return_amount.toFixed(2) : '--'
           const rate = item.return_rate != null ? ((item.return_rate * 100).toFixed(2) + '%') : '--'
@@ -729,7 +743,7 @@ async function fetchContribForPeriod(start, end) {
       },
       grid: { left: '5%', right: '10%', top: 10, bottom: 10 },
       xAxis: { type: 'value', splitLine: { lineStyle: { color: '#f3f4f6' } }, axisLabel: { color: '#9ca3af', formatter: '¥{value}' } },
-      yAxis: { type: 'category', data: res.data.map(d => d.stock_name), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#1e2130', fontWeight: 500 } },
+      yAxis: { type: 'category', data: items.map(d => d.stock_name), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#1e2130', fontWeight: 500 } },
       series: [{
         type: 'bar', data: vals.map((v, i) => ({ value: v, itemStyle: { color: v >= 0 ? '#e15241' : '#1aad56', borderRadius: [0, 4, 4, 0] } })),
         label: { show: true, position: 'right', color: '#6b7280', formatter: p => '¥' + Math.abs(p.value).toFixed(0) },

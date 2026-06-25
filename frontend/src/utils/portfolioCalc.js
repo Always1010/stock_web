@@ -99,6 +99,104 @@ export function calcMonthlyReturns(navSeries, year) {
   return result
 }
 
+// ── 从原始 K 线计算 NAV 序列 ─────────────────────────────
+
+/**
+ * 从持仓原始 K 线数据计算 NAV 序列（前端核心计算）。
+ * @param {Array<{stock_code: string, shares: number, cost_price: number|null, kline: Array<{date: string, close: number}>}>} holdings
+ * @returns {Array<{date: string, nav: number, total_cost: number}>} 按日期升序排列的 NAV 序列
+ */
+export function calcNavSeries(holdings) {
+  // 收集所有交易日期，并按日期合并各持仓的收盘价
+  const dateMap = {}
+  for (const h of holdings) {
+    for (const k of h.kline) {
+      if (!dateMap[k.date]) dateMap[k.date] = {}
+      dateMap[k.date][h.stock_code] = { close: k.close, shares: h.shares, cost_price: h.cost_price }
+    }
+  }
+
+  // 总成本固定（不随日期变化）
+  let totalCost = 0
+  for (const h of holdings) {
+    if (h.cost_price != null) totalCost += h.shares * h.cost_price
+  }
+
+  // 按日期排序后计算每日 NAV
+  const dates = Object.keys(dateMap).sort()
+  const result = []
+  for (const date of dates) {
+    let nav = 0
+    const stocks = dateMap[date]
+    for (const code of Object.keys(stocks)) {
+      const s = stocks[code]
+      nav += s.close * s.shares
+    }
+    result.push({ date, nav, total_cost: totalCost })
+  }
+  return result
+}
+
+/**
+ * 从持仓原始 K 线数据计算个股贡献（前端替代 /contributions 端点）。
+ * @param {Array} holdings - 同 calcNavSeries
+ * @param {string} startDate - YYYY-MM-DD
+ * @param {string} endDate - YYYY-MM-DD
+ * @returns {Array<{stock_code, stock_name, shares, cost_price, start_price, end_price, market_value, return_amount, return_rate}>}
+ */
+export function calcContributions(holdings, startDate, endDate) {
+  const items = []
+  let totalCost = 0
+  for (const h of holdings) {
+    if (h.cost_price != null) totalCost += h.shares * h.cost_price
+  }
+
+  for (const h of holdings) {
+    // 找起始日和截止日的收盘价
+    let startPrice = null
+    let endPrice = null
+    const klines = h.kline || []
+
+    if (startDate === endDate) {
+      // 单日查询：用 end vs prev
+      for (let i = 0; i < klines.length; i++) {
+        if (klines[i].date === endDate && i > 0) {
+          startPrice = klines[i - 1].close
+          endPrice = klines[i].close
+          break
+        }
+      }
+    } else {
+      for (const k of klines) {
+        if (startPrice == null && k.date >= startDate) startPrice = k.close
+        if (k.date <= endDate) endPrice = k.close
+      }
+    }
+
+    const marketValue = endPrice != null ? h.shares * endPrice : 0
+    let returnAmount = null
+    let returnRate = null
+
+    if (startPrice != null && endPrice != null && startPrice > 0) {
+      returnAmount = (endPrice - startPrice) * h.shares
+      returnRate = (endPrice / startPrice) - 1
+    }
+
+    items.push({
+      stock_code: h.stock_code,
+      stock_name: h.stock_name,
+      shares: h.shares,
+      cost_price: h.cost_price,
+      start_price: startPrice,
+      end_price: endPrice,
+      market_value: marketValue,
+      return_amount: returnAmount,
+      return_rate: returnRate,
+    })
+  }
+  return items
+}
+
 // ── 格式化（与后端返回格式对齐）────────────────────────
 
 /** 金额格式化 */

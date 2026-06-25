@@ -132,6 +132,24 @@ class ContributionResponse(BaseModel):
     data: list[ContributionItem]
 
 
+# ── Holdings K-line（前端计算用原始数据）────────────────────────
+
+class KlinePoint(BaseModel):
+    date: str
+    close: float
+
+class HoldingKlineItem(BaseModel):
+    stock_code: str
+    stock_name: str
+    shares: float
+    cost_price: float | None = None
+    kline: list[KlinePoint] = []
+
+class HoldingsKlineResponse(BaseModel):
+    portfolio_code: str
+    return_start_date: date | None = None
+    holdings: list[HoldingKlineItem]
+
 # ── Return Start Date ───────────────────────────────────────────
 
 class SetReturnStartDateRequest(BaseModel):

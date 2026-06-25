@@ -66,6 +66,7 @@ export const portfolioApi = {
   nav: (code, start, end) => api.get(`/portfolios/${code}/nav`, { params: { start, end } }),
   dailyReturns: (code, year, month) => api.get(`/portfolios/${code}/daily-returns`, { params: { year, ...(month ? { month } : {}) } }),
   monthlyReturns: (code, year) => api.get(`/portfolios/${code}/monthly-returns`, { params: { year } }),
+  holdingsKline: (code, start, end) => api.get(`/portfolios/${code}/holdings-kline`, { params: { start, end } }),
   contributions: (code, start, end) => api.get(`/portfolios/${code}/contributions`, { params: { start, end } }),
   setReturnStartDate: (code, data) => api.put(`/portfolios/${code}/return-start-date`, data),
   refreshData: (code) => api.post(`/portfolios/${code}/refresh-data`),
