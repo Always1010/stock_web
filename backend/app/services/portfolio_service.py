@@ -270,9 +270,11 @@ def calculate_contributions(
         return_rate = None
         contribution_pct = None
 
-        if holding.cost_price is not None and end_price is not None:
-            return_amount = (end_price - holding.cost_price) * holding.shares
-            return_rate = (end_price / holding.cost_price) - 1
+        # Use start_price as base for period returns, fall back to cost_price
+        base_price = start_price if start_price is not None else holding.cost_price
+        if base_price is not None and end_price is not None and base_price > 0:
+            return_amount = (end_price - base_price) * holding.shares
+            return_rate = (end_price / base_price) - 1
 
             # Contribution as percentage of portfolio total cost
             total_cost = sum(

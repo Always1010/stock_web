@@ -554,14 +554,11 @@ def get_monthly_returns(
         return_rate = None
 
         if month_navs:
-            # Sum daily returns for the month
-            daily_amounts = [n.daily_return for n in month_navs if n.daily_return is not None]
-            if daily_amounts:
-                return_amount = sum(daily_amounts)
-
-            # Use the cumulative return rate at the last trading day
-            last_record = month_navs[-1]
-            return_rate = last_record.cum_return_rate
+            first_nav = month_navs[0].nav
+            last_nav = month_navs[-1].nav
+            if first_nav and first_nav > 0:
+                return_amount = last_nav - first_nav
+                return_rate = (last_nav - first_nav) / first_nav
 
         data.append(
             MonthlyReturnItem(
