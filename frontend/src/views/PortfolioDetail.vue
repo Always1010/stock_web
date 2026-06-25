@@ -24,6 +24,61 @@
       </div>
     </div>
 
+    <!-- Actions Bar -->
+    <div class="pf-actions">
+      <div class="action-group">
+        <label class="action-label">收益起始日</label>
+        <div class="date-picker-wrap">
+          <input
+            type="date"
+            :value="returnStartDateStr"
+            @change="handleReturnStartDateChange"
+            class="date-input"
+          />
+          <button
+            v-if="returnStartDateStr"
+            class="action-btn-sm"
+            @click="handleClearReturnStartDate"
+            title="清除起始日"
+          >&times;</button>
+        </div>
+      </div>
+
+      <div class="action-divider"></div>
+
+      <div class="action-group">
+        <label class="action-label">数据更新</label>
+        <div class="btn-row">
+          <button class="action-btn" :disabled="refreshingData" @click="handleFullDataRefresh">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 :class="{ spinning: refreshingData }">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            {{ refreshingData ? '更新中...' : '全量更新' }}
+          </button>
+          <button class="action-btn" :disabled="refreshingData" @click="handleIncrDataRefresh">增量更新</button>
+        </div>
+      </div>
+
+      <div class="action-divider"></div>
+
+      <div class="action-group">
+        <label class="action-label">收益计算</label>
+        <div class="btn-row">
+          <button class="action-btn" :disabled="refreshingNav" @click="handleFullNavRecalc">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 :class="{ spinning: refreshingNav }">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            {{ refreshingNav ? '计算中...' : '全量更新' }}
+          </button>
+          <button class="action-btn" :disabled="refreshingNav" @click="handleIncrNavRecalc">增量更新</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Holdings -->
     <div class="section">
       <div class="section-header">
@@ -185,7 +240,7 @@ import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { portfolioApi, stockApi } from '../api'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const code = route.params.code
@@ -216,6 +271,11 @@ const highlightIdx = ref(-1)
 const selectedStockName = ref('')
 let searchTimer = null
 
+// Actions bar
+const returnStartDateStr = ref('')
+const refreshingData = ref(false)
+const refreshingNav = ref(false)
+
 // Charts
 const curveRef = ref(null), heatRef = ref(null), contribRef = ref(null)
 let cc = null, hc = null, oc = null
@@ -235,6 +295,79 @@ watch(showAdd, (v) => {
     selectedStockName.value = ''
   }
 })
+
+// Sync return_start_date from portfolio data
+watch(() => portfolio.value.return_start_date, (val) => {
+  returnStartDateStr.value = val || ''
+})
+
+// ── Actions bar handlers ──
+
+async function handleReturnStartDateChange(e) {
+  const val = e.target.value || null
+  try {
+    await portfolioApi.setReturnStartDate(code, { return_start_date: val })
+    ElMessage.success(val ? `收益起始日已设为 ${val}` : '收益起始日已清除')
+    await refresh()
+  } catch { /* handled */ }
+}
+
+async function handleClearReturnStartDate() {
+  try {
+    await portfolioApi.setReturnStartDate(code, { return_start_date: null })
+    returnStartDateStr.value = ''
+    ElMessage.success('收益起始日已清除')
+    await refresh()
+  } catch { /* handled */ }
+}
+
+async function handleFullDataRefresh() {
+  refreshingData.value = true
+  try {
+    const { data } = await portfolioApi.refreshData(code)
+    ElMessage.success(data.message || '全量数据更新完成')
+    await refresh()
+  } catch { /* handled */ }
+  finally { refreshingData.value = false }
+}
+
+async function handleIncrDataRefresh() {
+  refreshingData.value = true
+  try {
+    const { data } = await portfolioApi.refreshDataIncr(code)
+    ElMessage.success(data.message || '增量数据更新完成')
+    await refresh()
+  } catch { /* handled */ }
+  finally { refreshingData.value = false }
+}
+
+async function handleFullNavRecalc() {
+  refreshingNav.value = true
+  try {
+    const { data } = await portfolioApi.recalcNav(code)
+    ElMessage.success(data.message || '全量收益计算完成')
+    await refresh()
+    await nextTick()
+    if (tab.value === 'curve') renderCurve()
+    else if (tab.value === 'heatmap') renderHeatmap()
+    else if (tab.value === 'contrib') renderContribution()
+  } catch { /* handled */ }
+  finally { refreshingNav.value = false }
+}
+
+async function handleIncrNavRecalc() {
+  refreshingNav.value = true
+  try {
+    const { data } = await portfolioApi.recalcNavIncr(code)
+    ElMessage.success(data.message || '增量收益计算完成')
+    await refresh()
+    await nextTick()
+    if (tab.value === 'curve') renderCurve()
+    else if (tab.value === 'heatmap') renderHeatmap()
+    else if (tab.value === 'contrib') renderContribution()
+  } catch { /* handled */ }
+  finally { refreshingNav.value = false }
+}
 
 // ── Stock search ──
 watch(searchQuery, () => {
@@ -516,4 +649,60 @@ onUnmounted(() => { window.removeEventListener('resize', hr); cc?.dispose(); hc?
 .stock-sel-label { color: var(--color-primary); font-weight: 500; }
 .stock-sel-code { font-family: var(--font-mono); font-weight: 600; }
 .stock-sel-name { color: var(--color-text-secondary); }
+
+/* ── Actions Bar ── */
+.pf-actions {
+  display: flex; align-items: center; gap: var(--space-4);
+  background: var(--color-surface); border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-6); margin-bottom: var(--space-6);
+  box-shadow: var(--shadow-sm); flex-wrap: wrap;
+}
+
+.action-group { display: flex; align-items: center; gap: var(--space-2); }
+.action-label {
+  font-size: var(--text-xs); color: var(--color-text-secondary);
+  font-weight: 500; white-space: nowrap;
+}
+
+.date-picker-wrap { display: flex; align-items: center; gap: 4px; }
+.date-input {
+  height: 30px; padding: 0 var(--space-2);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  font-size: var(--text-xs); font-family: inherit;
+  color: var(--color-text-primary); background: var(--color-bg); outline: none;
+}
+.date-input:focus { border-color: var(--color-primary); }
+
+.action-btn-sm {
+  height: 22px; width: 22px; display: inline-flex;
+  align-items: center; justify-content: center;
+  border: 1px solid var(--color-border); border-radius: 50%;
+  background: transparent; cursor: pointer;
+  font-size: 14px; color: var(--color-text-muted); font-family: inherit;
+}
+.action-btn-sm:hover { background: var(--color-bg); color: var(--color-danger); }
+
+.action-divider {
+  width: 1px; height: 28px; background: var(--color-divider); flex-shrink: 0;
+}
+
+.btn-row { display: flex; gap: 6px; }
+
+.action-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 28px; padding: 0 var(--space-3);
+  border: 1px solid var(--color-border); background: transparent;
+  border-radius: var(--radius-sm); font-size: var(--text-xs);
+  font-weight: 500; cursor: pointer; font-family: inherit;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast); white-space: nowrap;
+}
+.action-btn:hover:not(:disabled) {
+  border-color: var(--color-primary); color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+.action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.spinning { animation: spin 0.8s linear infinite; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
 </style>
